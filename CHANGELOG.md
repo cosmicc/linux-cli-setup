@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 - Added `data/package-groups.tsv` as the editable source for package group mappings across Arch and Debian/Ubuntu.
 - Added an interactive install prompt for optional `dev`, `netops`, `docker`, and `desktop` groups when no explicit group option is provided.
 - Added a GitHub release/prerelease self-update check for install, update, and uninstall scripts before they make system changes.
+- Added `vim` to the required `core` package group for Arch and Debian/Ubuntu systems.
+- Added NFS client packages to the required `core` package group: `nfs-utils` on Arch and `nfs-common` on Debian/Ubuntu.
 
 ### Changed
 

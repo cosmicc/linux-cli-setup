@@ -69,13 +69,15 @@ Keep these package mappings aligned with `data/package-groups.tsv`. The TSV file
 
 ### Core
 
-Core always includes OpenSSH, Git, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, prompt config, and MOTD.
+Core always includes OpenSSH, Git, Vim, NFS client support, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, prompt config, and MOTD.
 
 | Purpose | Arch / Garuda | Debian / Ubuntu |
 | --- | --- | --- |
 | Downloads / repos | `curl`, `wget`, `ca-certificates`, `gnupg` | `curl`, `wget`, `ca-certificates`, `gnupg` |
 | Archives | `unzip`, `zip`, `p7zip`, `tar`, `gzip`, `xz` | `unzip`, `zip`, `p7zip-full`, `tar`, `gzip`, `xz-utils` |
 | Terminal multiplexer | `tmux` | `tmux` |
+| Baseline editor | `vim` | `vim` |
+| NFS client support | `nfs-utils` | `nfs-common` |
 | Search / navigation | `ripgrep`, `fd`, `fzf`, `plocate` | `ripgrep`, `fd-find`, `fzf`, `plocate` |
 | File viewing | `bat`, `eza`, `tree`, `less` | `bat`, `eza`, `tree`, `less` |
 | JSON / YAML | `jq`, `yq` | `jq`, `yq` |
