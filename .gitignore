@@ -1,0 +1,4 @@
+.auto-update.conf
+*.bak
+*.tmp
+.DS_Store

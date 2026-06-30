@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Linux CLI Setup automatic updates daily
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

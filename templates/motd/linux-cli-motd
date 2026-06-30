@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# Dynamic login MOTD installed by linux-cli-setup. It intentionally reports only
+# host health basics and avoids application/database-specific monitors.
+
+set -euo pipefail
+
+separator() {
+    printf '%*s\n' 78 '' | tr ' ' '='
+}
+
+section_separator() {
+    printf '%*s\n' 78 '' | tr ' ' '-'
+}
+
+format_bytes_gib() {
+    local kib="$1"
+    awk -v kib="$kib" 'BEGIN { printf "%.1fGi", kib / 1024 / 1024 }'
+}
+
+memory_summary() {
+    local total available used
+    total="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)"
+    available="$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)"
+    used=$((total - available))
+    printf '%s / %s' "$(format_bytes_gib "$used")" "$(format_bytes_gib "$total")"
+}
+
+root_disk_summary() {
+    df -h / | awk 'NR == 2 { printf "%s used of %s (%s)", $3, $2, $5 }'
+}
+
+ip_summary() {
+    local addresses
+    addresses="$(
+        ip -o -4 addr show scope global 2>/dev/null |
+            awk '{ split($4, ip, "/"); output = output ? output ", " ip[1] : ip[1] } END { print output }'
+    )"
+    printf '%s' "${addresses:-unavailable}"
+}
+
+reboot_required() {
+    local latest_kernel
+
+    if [[ -f /var/run/reboot-required ]]; then
+        printf 'yes'
+        return
+    fi
+
+    latest_kernel="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | sort -V | tail -n 1 || true)"
+    if [[ -n "$latest_kernel" && "$(uname -r)" != "$latest_kernel" ]]; then
+        printf 'maybe'
+        return
+    fi
+
+    printf 'no'
+}
+
+service_status() {
+    local unit="$1"
+    local current_status
+
+    if command -v systemctl >/dev/null 2>&1; then
+        current_status="$(systemctl is-active "$unit" 2>/dev/null || true)"
+        printf '%s' "${current_status:-unknown}"
+        return
+    fi
+
+    printf 'unknown'
+}
+
+ssh_status() {
+    local status
+    status="$(service_status ssh.service)"
+    if [[ "$status" == "unknown" || "$status" == "inactive" || "$status" == "failed" ]]; then
+        status="$(service_status sshd.service)"
+    fi
+    printf '%s' "$status"
+}
+
+host_name="$(hostname 2>/dev/null || printf 'linux-host')"
+load_average="$(cut -d' ' -f1-3 /proc/loadavg)"
+
+separator
+printf '  %s\n' "$host_name"
+separator
+printf '  %-13s %s\n' 'Uptime:' "$(uptime -p | sed 's/^up //')"
+printf '  %-13s %s\n' 'Kernel:' "$(uname -r)"
+printf '  %-13s %s\n' 'Load Avg:' "$load_average"
+printf '  %-13s %s\n' 'Memory:' "$(memory_summary)"
+printf '  %-13s %s\n' 'Root Disk:' "$(root_disk_summary)"
+printf '  %-13s %s\n' 'IP Address:' "$(ip_summary)"
+section_separator
+printf '  ssh: %s\n' "$(ssh_status)"
+section_separator
+printf '  %-17s %s\n' 'Reboot Required:' "$(reboot_required)"
+separator

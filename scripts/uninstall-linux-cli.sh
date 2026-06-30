@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+#
+# Remove linux-cli-setup managed configuration. Package removal is intentionally
+# opt-in because many recommended CLI packages may have been installed manually.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/linux-cli-common.sh
+source "$SCRIPT_DIR/lib/linux-cli-common.sh"
+
+REMOVE_PACKAGES=0
+RESTORE_SHELL=1
+
+show_help() {
+    cat <<'HELP'
+Usage: sudo ./uninstall.sh [options]
+
+Remove linux-cli-setup managed MOTD and Fish configuration.
+
+Options:
+  --remove-packages       Also remove packages for selected or saved profiles.
+  --profile NAME[,NAME]   Select package profiles to remove with --remove-packages.
+  --profiles NAME[,NAME]  Alias for --profile.
+  --all-profiles          Select every profile for package removal.
+  --keep-shell            Do not restore the user's pre-install default shell.
+  --list-profiles         Show available profiles.
+  --debug                 Show captured installer output and debug details.
+  --no-color              Disable colored console output.
+  --version               Show version.
+  --help                  Show this help.
+
+Default behavior preserves installed packages and restores the saved shell when
+state is available.
+HELP
+}
+
+parse_uninstall_args() {
+    local remaining=()
+    local arg
+
+    while [[ $# -gt 0 ]]; do
+        arg="$1"
+        case "$arg" in
+            --remove-packages)
+                REMOVE_PACKAGES=1
+                ;;
+            --keep-shell)
+                RESTORE_SHELL=0
+                ;;
+            --debug|--no-color|--no-colour)
+                remaining+=("$arg")
+                ;;
+            --help|--version|--profile|--profiles|--profile=*|--profiles=*|--all-profiles|--list-profiles|--)
+                remaining+=("$arg")
+                if [[ "$arg" == "--profile" || "$arg" == "--profiles" ]]; then
+                    shift
+                    [[ $# -gt 0 ]] || die "$arg requires a profile name or comma-separated profile list."
+                    remaining+=("$1")
+                elif [[ "$arg" == "--" ]]; then
+                    shift
+                    while [[ $# -gt 0 ]]; do
+                        remaining+=("$1")
+                        shift
+                    done
+                    break
+                fi
+                ;;
+            *)
+                remaining+=("$arg")
+                ;;
+        esac
+        shift
+    done
+
+    parse_profile_selection 0 "${remaining[@]}"
+}
+
+restore_shell_if_needed() {
+    local saved_shell
+    local current_shell
+
+    [[ "$RESTORE_SHELL" -eq 1 ]] || return
+
+    saved_shell="$(read_state_value original_shell || true)"
+    [[ -n "$saved_shell" && -x "$saved_shell" ]] || return
+
+    current_shell="$(getent passwd "$TARGET_USER" | cut -d: -f7)"
+    if [[ "$current_shell" == "$(command -v fish 2>/dev/null || true)" ]]; then
+        log "Restoring $TARGET_USER default shell to $saved_shell"
+        if command -v chsh >/dev/null 2>&1; then
+            run_step_optional "Restoring shell" "$TARGET_USER to $saved_shell" chsh -s "$saved_shell" "$TARGET_USER"
+        else
+            run_step_optional "Restoring shell" "$TARGET_USER to $saved_shell" usermod --shell "$saved_shell" "$TARGET_USER"
+        fi
+    fi
+}
+
+reenable_motd_snippets() {
+    local disabled_file
+    local motd_file
+
+    if [[ ! -d /etc/update-motd.d/.linux-cli-setup-disabled ]]; then
+        return
+    fi
+
+    while IFS= read -r -d '' disabled_file; do
+        while IFS= read -r motd_file; do
+            [[ -n "$motd_file" && -f "$motd_file" ]] || continue
+            log "Re-enabling MOTD snippet $motd_file"
+            run_step_optional "Re-enabling MOTD snippet" "$motd_file" chmod a+x "$motd_file"
+        done < "$disabled_file"
+    done < <(find /etc/update-motd.d/.linux-cli-setup-disabled -type f -name 'disabled-*.txt' -print0)
+
+    run_step_optional "Removing directory" "/etc/update-motd.d/.linux-cli-setup-disabled" rm -rf /etc/update-motd.d/.linux-cli-setup-disabled
+}
+
+remove_managed_files() {
+    local fish_config_dir="$TARGET_HOME/.config/fish"
+
+    remove_file_if_managed_or_backup "$fish_config_dir/config.fish" "$FISH_TEMPLATE_DIR/config.fish"
+    remove_file_if_managed_or_backup "$fish_config_dir/fish_plugins" "$FISH_TEMPLATE_DIR/fish_plugins"
+
+    if systemd_available; then
+        run_step_optional "Disabling timer" "linux-cli-auto-update.timer" systemctl disable --now linux-cli-auto-update.timer
+    fi
+
+    run_step_optional "Removing file" "/usr/local/bin/linux-cli-motd" rm -f /usr/local/bin/linux-cli-motd
+    run_step_optional "Removing file" "/usr/local/bin/time-status" rm -f /usr/local/bin/time-status
+    run_step_optional "Removing file" "/usr/local/bin/ntp-status" rm -f /usr/local/bin/ntp-status
+    run_step_optional "Removing file" "/usr/local/sbin/linux-cli-auto-update" rm -f /usr/local/sbin/linux-cli-auto-update
+    run_step_optional "Removing file" "/etc/update-motd.d/50-linux-cli-setup" rm -f /etc/update-motd.d/50-linux-cli-setup
+    run_step_optional "Removing file" "/etc/fish/conf.d/linux-cli-motd.fish" rm -f /etc/fish/conf.d/linux-cli-motd.fish
+    run_step_optional "Removing file" "/etc/systemd/system/linux-cli-auto-update.service" rm -f /etc/systemd/system/linux-cli-auto-update.service
+    run_step_optional "Removing file" "/etc/systemd/system/linux-cli-auto-update.timer" rm -f /etc/systemd/system/linux-cli-auto-update.timer
+    run_step_optional "Removing file" "/etc/cron.d/linux-cli-auto-update" rm -f /etc/cron.d/linux-cli-auto-update
+    run_step_optional "Removing file" "/etc/systemd/timesyncd.conf.d/10-linux-cli-setup.conf" rm -f /etc/systemd/timesyncd.conf.d/10-linux-cli-setup.conf
+
+    if systemd_available; then
+        run_step_optional "Reloading" "systemd manager configuration" systemctl daemon-reload
+    fi
+
+    reenable_motd_snippets
+}
+
+select_package_removal_profiles() {
+    local profiles
+
+    if [[ "${#SELECTED_PROFILES[@]}" -gt 0 ]]; then
+        return
+    fi
+
+    profiles="$(state_profiles)"
+    SELECTED_PROFILES=()
+    add_profile_csv "$profiles"
+}
+
+remove_selected_profile_packages() {
+    local profile
+
+    [[ "$REMOVE_PACKAGES" -eq 1 ]] || return
+    select_package_removal_profiles
+
+    for profile in "${SELECTED_PROFILES[@]}"; do
+        remove_profile_packages "$profile"
+    done
+}
+
+main() {
+    parse_uninstall_args "$@"
+
+    if [[ "${#PROFILE_POSITIONAL_ARGS[@]}" -gt 0 ]]; then
+        case "${PROFILE_POSITIONAL_ARGS[0]}" in
+            --help)
+                show_help
+                exit 0
+                ;;
+            --version)
+                print_version
+                exit 0
+                ;;
+            *)
+                die "Unknown argument: ${PROFILE_POSITIONAL_ARGS[0]}"
+                ;;
+        esac
+    fi
+
+    require_root
+    init_logging uninstall
+    init_runtime_context
+    PACKAGE_STEP_VERB="Uninstalling"
+    export PACKAGE_STEP_VERB
+
+    log "Target user: $TARGET_USER"
+    remove_managed_files
+    restore_shell_if_needed
+    remove_selected_profile_packages
+    run_step_optional "Removing directory" "$STATE_DIR" rm -rf "$STATE_DIR"
+
+    log "Uninstall complete."
+}
+
+main "$@"

@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+#
+# Automatic update + reboot notification/reboot script for Debian/Ubuntu and
+# Arch-based hosts. Secrets are read from /etc/linux-cli-setup/auto-update.conf.
+
+set -euo pipefail
+
+CONFIG_FILE="/etc/linux-cli-setup/auto-update.conf"
+LOG_DIR="/var/log/linux-cli-setup"
+TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+LOG_FILE="$LOG_DIR/auto-update-${TIMESTAMP}.log"
+VERSION="0.1a"
+DEBUG=0
+CURRENT_STEP_OUTPUT=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --debug)
+            DEBUG=1
+            ;;
+        --version)
+            echo "linux-cli-auto-update $VERSION"
+            exit 0
+            ;;
+        --help)
+            cat <<'HELP'
+Usage: linux-cli-auto-update [--debug] [--version] [--help]
+
+Run unattended Debian/Ubuntu or Arch system updates using settings from
+/etc/linux-cli-setup/auto-update.conf.
+HELP
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+mkdir -p "$LOG_DIR"
+touch "$LOG_FILE"
+chmod 0644 "$LOG_FILE"
+
+log() {
+    local message="[linux-cli-auto-update] $*"
+    echo "$message"
+    echo "$message" >> "$LOG_FILE"
+}
+
+debug() {
+    [[ "$DEBUG" -eq 1 ]] || return 0
+    log "DEBUG: $*"
+}
+
+show_step_tail() {
+    [[ -n "$CURRENT_STEP_OUTPUT" && -f "$CURRENT_STEP_OUTPUT" ]] || return 0
+    log "Last output from failed step:"
+    tail -n 25 "$CURRENT_STEP_OUTPUT" | while IFS= read -r line; do
+        log "  $line"
+    done
+}
+
+run_step() {
+    local action="$1"
+    local item="$2"
+    shift 2
+
+    CURRENT_STEP_OUTPUT="$(mktemp)"
+    log "${action}: ${item}"
+    debug "Command: $*"
+
+    if "$@" > "$CURRENT_STEP_OUTPUT" 2>&1; then
+        if [[ "$DEBUG" -eq 1 && -s "$CURRENT_STEP_OUTPUT" ]]; then
+            while IFS= read -r line; do
+                log "  $line"
+            done < "$CURRENT_STEP_OUTPUT"
+        fi
+        rm -f "$CURRENT_STEP_OUTPUT"
+        CURRENT_STEP_OUTPUT=""
+        log "${action} complete: ${item}"
+        return 0
+    fi
+
+    local rc=$?
+    log "ERROR: ${action} failed: ${item} (exit $rc)"
+    show_step_tail
+    rm -f "$CURRENT_STEP_OUTPUT"
+    CURRENT_STEP_OUTPUT=""
+    return "$rc"
+}
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+fi
+
+MODE="${MODE:-notify}"
+PUSHOVER_USER_KEY="${PUSHOVER_USER_KEY:-}"
+PUSHOVER_API_TOKEN="${PUSHOVER_API_TOKEN:-}"
+PUSHOVER_TITLE="${PUSHOVER_TITLE:-Linux Update}"
+AUR_USER="${AUR_USER:-}"
+ENABLE_AUR_UPDATES="${ENABLE_AUR_UPDATES:-1}"
+
+send_pushover() {
+    local message="$1"
+
+    if [[ -z "$PUSHOVER_USER_KEY" || -z "$PUSHOVER_API_TOKEN" ]]; then
+        log "Pushover credentials are not configured; notification skipped."
+        return 0
+    fi
+
+    run_step "Notifying" "Pushover" curl -fsS \
+        -F "token=$PUSHOVER_API_TOKEN" \
+        -F "user=$PUSHOVER_USER_KEY" \
+        -F "title=$PUSHOVER_TITLE" \
+        -F "message=$message" \
+        https://api.pushover.net/1/messages.json
+}
+
+reboot_required() {
+    local latest_kernel
+
+    if [[ -f /var/run/reboot-required ]]; then
+        return 0
+    fi
+
+    latest_kernel="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | sort -V | tail -n 1 || true)"
+    [[ -n "$latest_kernel" && "$(uname -r)" != "$latest_kernel" ]]
+}
+
+update_debian() {
+    export DEBIAN_FRONTEND=noninteractive
+
+    run_step "Updating" "apt package indexes" apt-get update -y
+    run_step "Updating" "apt packages" apt-get -y \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        full-upgrade
+    run_step "Cleaning" "apt autoremove" apt-get autoremove -y
+    run_step "Cleaning" "apt autoclean" apt-get autoclean -y
+}
+
+update_arch() {
+    run_step "Updating" "pacman packages" pacman -Syu --noconfirm
+
+    if [[ "$ENABLE_AUR_UPDATES" == "1" && -n "$AUR_USER" && -x "$(command -v yay 2>/dev/null || true)" ]]; then
+        run_step "Updating" "AUR packages with yay" runuser -u "$AUR_USER" -- yay -Sua --noconfirm
+    elif [[ "$ENABLE_AUR_UPDATES" == "1" && -x "$(command -v yay 2>/dev/null || true)" ]]; then
+        log "yay is installed, but AUR_USER is not configured; skipping AUR updates."
+    fi
+}
+
+log "Starting unattended update on $(hostname). Log: $LOG_FILE"
+
+if command -v apt-get >/dev/null 2>&1; then
+    update_debian
+elif command -v pacman >/dev/null 2>&1; then
+    update_arch
+else
+    log "ERROR: unsupported package manager."
+    exit 1
+fi
+
+if reboot_required; then
+    if [[ "$MODE" == "reboot" ]]; then
+        log "Reboot required; rebooting now."
+        send_pushover "System $(hostname) updated and is rebooting now."
+        reboot
+    else
+        log "Reboot required; sending notification."
+        send_pushover "System $(hostname) requires a reboot after updates."
+    fi
+else
+    log "No reboot required."
+fi
+
+log "Finished updates."

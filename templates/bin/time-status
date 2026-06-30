@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#
+# Show local time, timezone, and high-level synchronization state.
+
+set -euo pipefail
+
+VERSION="0.1a"
+
+case "${1:-}" in
+    "")
+        ;;
+    --version)
+        echo "time-status $VERSION"
+        exit 0
+        ;;
+    --help)
+        echo "Usage: time-status [--version] [--help]"
+        exit 0
+        ;;
+    *)
+        echo "Unknown option: $1" >&2
+        exit 2
+        ;;
+esac
+
+echo "Local time:      $(date)"
+echo "UTC time:        $(date -u)"
+echo "Timezone:        $(cat /etc/timezone 2>/dev/null || timedatectl show -p Timezone --value 2>/dev/null || echo unknown)"
+
+if command -v timedatectl >/dev/null 2>&1; then
+    echo
+    timedatectl status --no-pager
+fi

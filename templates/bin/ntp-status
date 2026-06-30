@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# Show NTP synchronization details across common Linux time clients.
+
+set -euo pipefail
+
+VERSION="0.1a"
+
+case "${1:-}" in
+    "")
+        ;;
+    --version)
+        echo "ntp-status $VERSION"
+        exit 0
+        ;;
+    --help)
+        echo "Usage: ntp-status [--version] [--help]"
+        exit 0
+        ;;
+    *)
+        echo "Unknown option: $1" >&2
+        exit 2
+        ;;
+esac
+
+if command -v timedatectl >/dev/null 2>&1; then
+    timedatectl timesync-status --no-pager 2>/dev/null || timedatectl status --no-pager
+    exit 0
+fi
+
+if command -v chronyc >/dev/null 2>&1; then
+    chronyc tracking
+    chronyc sources -v
+    exit 0
+fi
+
+if command -v ntpq >/dev/null 2>&1; then
+    ntpq -p
+    exit 0
+fi
+
+echo "No supported NTP status tool was found."
+exit 1

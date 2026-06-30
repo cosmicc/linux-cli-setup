@@ -1,0 +1,5 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Run daily between 3:30 AM and 4:30 AM when systemd timers are unavailable.
+30 3 * * * root sleep $((RANDOM % 3601)); /usr/local/sbin/linux-cli-auto-update
