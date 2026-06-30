@@ -118,9 +118,29 @@ reenable_motd_snippets() {
 
 remove_managed_files() {
     local fish_config_dir="$TARGET_HOME/.config/fish"
+    local function_template
+    local ssh_dir="$TARGET_HOME/.ssh"
+    local ssh_config="$ssh_dir/config"
+    local include_line='Include ~/.ssh/conf.d/*.conf'
 
     remove_file_if_managed_or_backup "$fish_config_dir/config.fish" "$FISH_TEMPLATE_DIR/config.fish"
     remove_file_if_managed_or_backup "$fish_config_dir/fish_plugins" "$FISH_TEMPLATE_DIR/fish_plugins"
+    while IFS= read -r -d '' function_template; do
+        remove_file_if_managed_or_backup "$fish_config_dir/functions/$(basename "$function_template")" "$function_template"
+    done < <(find "$FISH_TEMPLATE_DIR/functions" -maxdepth 1 -type f -name '*.fish' -print0)
+    remove_file_if_managed_or_backup /etc/sysctl.d/99-linux-cli-setup-hardening.conf "$SYSCTL_TEMPLATE_DIR/99-linux-cli-setup-hardening.conf"
+    run_step_optional "Applying" "remaining sysctl settings" sysctl --system || true
+    remove_file_if_managed_or_backup "$ssh_dir/conf.d/00-defaults.conf" "$SSH_TEMPLATE_DIR/00-defaults.conf"
+    if [[ -d "$ssh_dir/controlmasters" ]] && [[ -z "$(find "$ssh_dir/controlmasters" -mindepth 1 -print -quit)" ]]; then
+        run_step_optional "Removing directory" "$ssh_dir/controlmasters" rmdir "$ssh_dir/controlmasters"
+    fi
+    if [[ -d "$ssh_dir/conf.d" ]] && [[ -z "$(find "$ssh_dir/conf.d" -mindepth 1 -print -quit)" ]]; then
+        run_step_optional "Removing directory" "$ssh_dir/conf.d" rmdir "$ssh_dir/conf.d"
+    fi
+
+    if [[ -f "$ssh_config" ]] && [[ "$(tr -d '\n' < "$ssh_config")" == "$include_line" ]]; then
+        run_step_optional "Removing file" "$ssh_config" rm -f "$ssh_config"
+    fi
 
     if systemd_available; then
         run_step_optional "Disabling timer" "linux-cli-auto-update.timer" systemctl disable --now linux-cli-auto-update.timer

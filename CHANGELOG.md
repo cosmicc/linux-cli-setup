@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3a - Unreleased
+
+### Added
+
+- Added the optional `comfort` profile for shell workflow tools, safer Fish abbreviations, managed Fish helper functions, and managed SSH client defaults.
+- Added best-effort cargo and pipx fallback installs for selected `comfort` tools when distro packages are unavailable.
+- Added `ufw` to the required `core` package group with managed default-deny firewall configuration for SSH, iperf3, and ping.
+- Added `rkhunter` to the `netops` package group.
+- Added the optional `wireless` profile for NetworkManager, Wi-Fi tooling, firmware packages, RF-kill controls, mobile broadband support, and wireless Fish helpers.
+- Added `install_test.sh` to check package availability across selected profiles without installing anything.
+- Added a managed basic sysctl hardening template.
+
+### Changed
+
+- Changed Fish plugin setup to use `zoxide` for directory jumping and added `edc/bass` to the managed Fisher plugin list.
+- Changed install and update to apply best-effort basic hardening, configure UFW, and clean unused packages plus package caches near the end of each run.
+
 ## 0.2a - 2026-06-30
 
 ### Added

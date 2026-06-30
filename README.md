@@ -1,8 +1,8 @@
 # Linux CLI Setup
 
-Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. The default install is a safe `core` CLI baseline; heavier roles such as development, network troubleshooting, Docker hosting, and desktop helpers are optional package groups.
+Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. The default install is a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, Docker hosting, and desktop helpers are optional package groups.
 
-Current alpha testing version: `0.2a`.
+Current unreleased alpha testing version: `0.3a`.
 
 ## Supported Systems
 
@@ -17,7 +17,7 @@ Run from the user account that should receive Fish as the default shell:
 sudo ./install.sh
 ```
 
-In an interactive terminal, install asks whether to add `dev`, `netops`, `docker`, and `desktop`. `core` is always installed and is not prompted. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
+In an interactive terminal, install asks whether to add `comfort`, `dev`, `netops`, `wireless`, `docker`, and `desktop`. `core` is always installed and is not prompted. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
 
 ```bash
 TARGET_USER=myuser ./install.sh
@@ -29,6 +29,8 @@ TARGET_USER=myuser ./install.sh
 
 ```bash
 sudo ./install.sh --profile dev,netops
+sudo ./install.sh --profile comfort
+sudo ./install.sh --profile wireless
 sudo ./install.sh --profile docker
 sudo ./install.sh --all-profiles
 ```
@@ -45,6 +47,7 @@ Show the script version:
 ./install.sh --version
 ./update.sh --version
 ./uninstall.sh --version
+./install_test.sh --version
 ```
 
 Available profiles:
@@ -52,15 +55,17 @@ Available profiles:
 | Profile | Purpose |
 | --- | --- |
 | `core` | Always-installed CLI baseline, Fish prompt, Git defaults, MOTD, and distro helpers. |
+| `comfort` | CLI workflow helpers, safer shell shortcuts, Fish functions, and SSH client defaults. |
 | `dev` | Python, C/C++ build tools, Neovim, uv, pipx tools, and developer Git helpers. |
 | `netops` | DNS, packet capture, port scanning, VPN, SSH, transfer, and MSP troubleshooting tools. |
+| `wireless` | NetworkManager, Wi-Fi scanning, firmware, RF-kill, mobile broadband, and wireless CLI helpers. |
 | `diagnostics` | Hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics. Explicit-only for compatibility. |
 | `docker` | Docker host packages, Compose plugin, Docker CLI helpers, and Fish Docker aliases. |
 | `desktop` | GUI workstation clipboard, desktop integration, and notification helpers. |
 
 ## Core Install
 
-The `core` profile installs OpenSSH, Git, Vim, NFS client support, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt, and a dynamic MOTD.
+The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt, and a dynamic MOTD.
 
 It also adds common CLI tools:
 
@@ -71,6 +76,7 @@ It also adds common CLI tools:
 | Terminal multiplexer | `tmux` | `tmux` |
 | Baseline editor | `vim` | `vim` |
 | NFS client support | `nfs-utils` | `nfs-common` |
+| Firewall | `ufw` | `ufw` |
 | Search / navigation | `ripgrep`, `fd`, `fzf`, `plocate` | `ripgrep`, `fd-find`, `fzf`, `plocate` |
 | File viewing | `bat`, `eza`, `tree`, `less` | `bat`, `eza`, `tree`, `less` |
 | JSON / YAML | `jq`, `yq` | `jq`, `yq` |
@@ -82,6 +88,21 @@ It also adds common CLI tools:
 | Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
 
 Some recommended packages are installed best-effort because older distro releases may not ship every package.
+
+The installer configures UFW with a default deny incoming policy, default allow outgoing policy, and explicit inbound allowances for SSH, iperf3 on port `5201` TCP/UDP, and ICMP echo-request ping. It does not reset pre-existing UFW rules.
+
+Install and update also apply a small managed sysctl hardening file, keep `/tmp` and `/var/tmp` sticky, then remove unused packages and clean the package cache. Hardening and cleanup steps are best-effort and continue on failure.
+
+## Package Availability Test
+
+Run the diagnostic checker when you want to find package name or repository discrepancies without installing anything:
+
+```bash
+./install_test.sh
+./install_test.sh --profile wireless,netops
+```
+
+It reads [data/package-groups.tsv](data/package-groups.tsv), checks the current system's package manager, prints every package checked, and exits nonzero if any selected package is unavailable.
 
 ## Git Defaults
 
@@ -100,9 +121,17 @@ If `delta` is available, it is configured as the pager and interactive diff filt
 
 ## Optional Profiles
 
+### Comfort
+
+Installs CLI workflow helpers such as `atuin`, `zoxide`, `direnv`, `mise`, `just`, `watchexec`, `hyperfine`, `trash-cli`, `httpie`, `miller`, `ripgrep-all`, `yazi`, `zellij`, `lazygit`, `difftastic`, `shellcheck`, `shfmt`, `gitleaks`, `age`, `sops`, `chezmoi`, and `etckeeper` where available.
+
+The installer uses distro packages first. If selected tools are missing and `cargo` or `pipx` is available, it attempts user-level fallback installs for common Rust/Python tools. It keeps Tide as the Fish prompt and adds Fish functions for `mkcd`, `extract`, `dnscheck`, `certcheck`, `serve`, `jfu`, and `scs`.
+
+The installer also creates a managed SSH include file at `~/.ssh/conf.d/00-defaults.conf` and adds `Include ~/.ssh/conf.d/*.conf` to `~/.ssh/config` when needed. It does not overwrite the user's full SSH config.
+
 ### Netops
 
-Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, bandwidth testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, SNMP, VPN tools, `mosh`, `sshfs`, `rsync`, `rclone`, and `fail2ban`.
+Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, bandwidth testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, SNMP, VPN tools, `mosh`, `sshfs`, `rsync`, `rclone`, `fail2ban`, and `rkhunter`.
 
 | Purpose | Arch | Debian / Ubuntu |
 | --- | --- | --- |
@@ -120,6 +149,15 @@ Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, b
 | SMB testing | `smbclient` | `smbclient` |
 | SNMP | `net-snmp` | `snmp`, `snmp-mibs-downloader` |
 | VPN tools | `wireguard-tools`, `openvpn` | `wireguard-tools`, `openvpn` |
+| Rootkit scanner | `rkhunter` | `rkhunter` |
+
+### Wireless
+
+Installs NetworkManager CLI tooling, WPA backends, Wi-Fi scanning tools, firmware packages, RF-kill controls, mobile broadband support, and optional tray integration packages where available.
+
+Selecting `wireless` adds Fish abbreviations such as `wifi`, `wifiscan`, `nmstat`, `nmt`, and `rfk`, plus `wifi-connect` and `wifi-info` functions. The script does not enable `iwd.service` automatically.
+
+NetworkManager is enabled only when it is already active/enabled, no obvious existing network stack is detected, or `LINUX_CLI_ENABLE_NETWORKMANAGER=1` is set. Set `LINUX_CLI_ENABLE_NETWORKMANAGER=0` to skip service enablement.
 
 ### Diagnostics
 

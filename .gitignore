@@ -1,4 +1,5 @@
 .auto-update.conf
+logs/
 *.bak
 *.tmp
 .DS_Store

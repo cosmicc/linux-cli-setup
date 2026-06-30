@@ -8,6 +8,8 @@ COMMON_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "$COMMON_SCRIPT_DIR/../.." && pwd)"
 VERSION_FILE="$PROJECT_ROOT/VERSION"
 FISH_TEMPLATE_DIR="$PROJECT_ROOT/templates/fish"
+SSH_TEMPLATE_DIR="$PROJECT_ROOT/templates/ssh"
+SYSCTL_TEMPLATE_DIR="$PROJECT_ROOT/templates/sysctl"
 MOTD_TEMPLATE="$PROJECT_ROOT/templates/motd/linux-cli-motd"
 AUTO_UPDATE_TEMPLATE_DIR="$PROJECT_ROOT/templates/auto-update"
 BIN_TEMPLATE_DIR="$PROJECT_ROOT/templates/bin"
@@ -23,8 +25,10 @@ TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 EXPECTED_GITHUB_REPO="${LINUX_CLI_SELF_UPDATE_REPO:-cosmicc/linux-cli-setup}"
 SELF_UPDATE_BRANCH="${LINUX_CLI_SELF_UPDATE_BRANCH:-main}"
 
-SUPPORTED_PROFILES=(core dev netops diagnostics docker desktop)
-INSTALL_PROMPT_PROFILES=(dev netops docker desktop)
+SUPPORTED_PROFILES=(core comfort dev netops wireless diagnostics docker desktop)
+INSTALL_PROMPT_PROFILES=(comfort dev netops wireless docker desktop)
+COMFORT_FISH_FUNCTIONS=(mkcd extract dnscheck certcheck serve jfu scs)
+WIRELESS_FISH_FUNCTIONS=(wifi-connect wifi-info)
 SELECTED_PROFILES=()
 PROFILES_EXPLICIT=0
 PROFILE_POSITIONAL_ARGS=()
@@ -106,6 +110,24 @@ init_logging() {
     LOG_FILE="$LOG_DIR/${action}-${TIMESTAMP}.log"
     touch "$LOG_FILE"
     chmod 0644 "$LOG_FILE"
+    log "Logging to $LOG_FILE"
+}
+
+init_logging_with_user_fallback() {
+    local action="$1"
+    local fallback_log_dir="$PROJECT_ROOT/logs"
+
+    if install -m 0755 -d "$LOG_DIR" >/dev/null 2>&1; then
+        LOG_FILE="$LOG_DIR/${action}-${TIMESTAMP}.log"
+        touch "$LOG_FILE"
+        chmod 0644 "$LOG_FILE"
+    else
+        mkdir -p "$fallback_log_dir"
+        LOG_FILE="$fallback_log_dir/${action}-${TIMESTAMP}.log"
+        touch "$LOG_FILE"
+        chmod 0644 "$LOG_FILE"
+    fi
+
     log "Logging to $LOG_FILE"
 }
 
@@ -236,7 +258,7 @@ project_version() {
         return
     fi
 
-    printf '0.2a'
+    printf '0.3a'
 }
 
 print_version() {
@@ -615,11 +637,17 @@ profile_description() {
         core)
             printf 'always installed CLI baseline, Fish prompt, Git defaults, MOTD, and distro helpers'
             ;;
+        comfort)
+            printf 'CLI workflow helpers, safer shell shortcuts, Fish functions, and SSH client defaults'
+            ;;
         dev)
             printf 'Python, C/C++ build tools, Neovim, uv, pipx tools, and developer Git helpers'
             ;;
         netops)
             printf 'DNS, packet capture, port scanning, VPN, SSH, transfer, and MSP troubleshooting tools'
+            ;;
+        wireless)
+            printf 'NetworkManager, Wi-Fi scanning, firmware, RF-kill, mobile broadband, and wireless CLI helpers'
             ;;
         diagnostics)
             printf 'hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics'
@@ -1002,6 +1030,78 @@ package_is_installed() {
     esac
 }
 
+package_is_available() {
+    local package="$1"
+
+    case "$PACKAGE_FAMILY" in
+        debian)
+            command -v apt-cache >/dev/null 2>&1 || return 1
+            apt-cache policy "$package" 2>/dev/null | awk '
+                $1 == "Candidate:" {
+                    if ($2 == "(none)") {
+                        exit 1
+                    }
+                    found = 1
+                }
+                END {
+                    exit found ? 0 : 1
+                }
+            '
+            ;;
+        arch)
+            if pacman -Si "$package" >/dev/null 2>&1; then
+                return 0
+            fi
+            if command -v yay >/dev/null 2>&1 && yay -Si "$package" >/dev/null 2>&1; then
+                return 0
+            fi
+            return 1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+test_package_availability_for_profiles() {
+    local profile
+    local package
+    local missing_count=0
+    local profile_package_count=0
+    local total_package_count=0
+    local packages=()
+
+    for profile in "${SELECTED_PROFILES[@]}"; do
+        mapfile -t packages < <(all_packages_for_profile "$PACKAGE_FAMILY" "$profile")
+        if [[ "${#packages[@]}" -eq 0 ]]; then
+            warn "No packages are defined for profile '$profile' on $PACKAGE_FAMILY."
+            continue
+        fi
+
+        profile_package_count=0
+        log "Checking package availability for profile: $profile"
+        for package in "${packages[@]}"; do
+            ((profile_package_count += 1))
+            ((total_package_count += 1))
+            console_line blue "[linux-cli-setup] Checking package: $profile/$package"
+            if package_is_available "$package"; then
+                success "Available: $profile/$package"
+            else
+                warn "Unavailable: $profile/$package"
+                ((missing_count += 1))
+            fi
+        done
+        log "Profile $profile package checks complete: $profile_package_count checked."
+    done
+
+    if [[ "$missing_count" -gt 0 ]]; then
+        warn "$missing_count of $total_package_count package checks were unavailable on this system."
+        return 1
+    fi
+
+    success "All $total_package_count package checks are available on this system."
+}
+
 record_package_install_rollback() {
     local package="$1"
 
@@ -1130,6 +1230,38 @@ update_package_database_and_system() {
     esac
 }
 
+cleanup_unused_packages_and_cache() {
+    local orphan_packages=()
+
+    log "Removing unused packages and cleaning package cache"
+    case "$PACKAGE_FAMILY" in
+        debian)
+            export DEBIAN_FRONTEND=noninteractive
+            run_step_optional "Cleaning" "apt unused packages" apt-get autoremove -y || true
+            run_step_optional "Cleaning" "apt package cache" apt-get autoclean -y || true
+            ;;
+        arch)
+            if command -v pacman >/dev/null 2>&1; then
+                mapfile -t orphan_packages < <(pacman -Qtdq 2>/dev/null || true)
+                if [[ "${#orphan_packages[@]}" -gt 0 ]]; then
+                    run_step_optional "Cleaning" "pacman orphan packages" pacman -Rns --noconfirm "${orphan_packages[@]}" || true
+                else
+                    log "No pacman orphan packages found."
+                fi
+
+                if command -v paccache >/dev/null 2>&1; then
+                    run_step_optional "Cleaning" "pacman package cache" paccache -rk2 || true
+                else
+                    run_step_optional "Cleaning" "pacman package cache" pacman -Sc --noconfirm || true
+                fi
+            fi
+            ;;
+        *)
+            warn "Unsupported package family for cleanup: $PACKAGE_FAMILY"
+            ;;
+    esac
+}
+
 ensure_yay_on_arch() {
     if [[ "$PACKAGE_FAMILY" != "arch" ]]; then
         return
@@ -1221,6 +1353,139 @@ enable_openssh_service() {
     log "OpenSSH service unit was not found; package install may have used a non-systemd layout"
 }
 
+detected_ssh_ports() {
+    local port
+
+    printf '22\n'
+    if command -v sshd >/dev/null 2>&1; then
+        while IFS= read -r port; do
+            [[ "$port" =~ ^[0-9]+$ ]] || continue
+            printf '%s\n' "$port"
+        done < <(sshd -T 2>/dev/null | awk '$1 == "port" { print $2 }')
+    fi
+}
+
+ensure_ufw_ping_rule() {
+    local rules_file="$1"
+    local chain_name="$2"
+    local rule_line="$3"
+    local tmp_file
+    local backup
+
+    [[ -f "$rules_file" ]] || return 0
+    if grep -Fq "$rule_line" "$rules_file"; then
+        return 0
+    fi
+
+    tmp_file="$(mktemp)"
+    awk -v rule="$rule_line" '
+        /^COMMIT$/ && !added {
+            print rule
+            added = 1
+        }
+        { print }
+        END {
+            if (!added) {
+                print rule
+            }
+        }
+    ' "$rules_file" > "$tmp_file"
+
+    backup="${rules_file}.linux-cli-setup.${TIMESTAMP}.bak"
+    run_step_optional "Backing up" "$rules_file" cp -p "$rules_file" "$backup" || {
+        rm -f "$tmp_file"
+        return 0
+    }
+    record_rollback_cmd "mv -f $(shell_quote "$backup") $(shell_quote "$rules_file")"
+    run_step_optional "Allowing" "$chain_name ICMP echo-request" install -m 0644 "$tmp_file" "$rules_file" || true
+    rm -f "$tmp_file"
+    return 0
+}
+
+configure_ufw_firewall() {
+    local ssh_port
+    local was_active=0
+
+    if ! command -v ufw >/dev/null 2>&1; then
+        warn "ufw is not installed; skipping firewall configuration."
+        return
+    fi
+
+    log "Configuring UFW firewall defaults"
+    if ufw status 2>/dev/null | grep -qi '^Status: active'; then
+        was_active=1
+    fi
+
+    if [[ "$was_active" -eq 0 ]]; then
+        record_rollback_cmd "ufw --force disable"
+    fi
+
+    run_step_optional "Configuring" "ufw default deny incoming" ufw default deny incoming || true
+    run_step_optional "Configuring" "ufw default allow outgoing" ufw default allow outgoing || true
+
+    while IFS= read -r ssh_port; do
+        [[ "$ssh_port" =~ ^[0-9]+$ ]] || continue
+        run_step_optional "Allowing" "SSH on tcp/$ssh_port" ufw allow "$ssh_port/tcp" || true
+    done < <(detected_ssh_ports | awk '!seen[$0]++')
+
+    run_step_optional "Allowing" "iperf3 tcp/5201" ufw allow 5201/tcp || true
+    run_step_optional "Allowing" "iperf3 udp/5201" ufw allow 5201/udp || true
+    ensure_ufw_ping_rule /etc/ufw/before.rules ufw-before-input '-A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT'
+    ensure_ufw_ping_rule /etc/ufw/before6.rules ufw6-before-input '-A ufw6-before-input -p ipv6-icmp --icmpv6-type echo-request -j ACCEPT'
+
+    run_step_optional "Enabling" "ufw firewall" ufw --force enable || true
+    if systemd_available && systemctl list-unit-files --no-legend ufw.service 2>/dev/null | grep -q '^ufw\.service'; then
+        run_step_optional "Enabling service" "ufw.service" systemctl enable --now ufw.service || true
+    fi
+}
+
+install_owned_file_optional() {
+    local source="$1"
+    local destination="$2"
+    local mode="$3"
+    local owner="$4"
+    local group="$5"
+    local backup
+
+    if [[ -L "$destination" ]]; then
+        warn "Skipping optional managed file $destination because it is a symlink."
+        return 0
+    fi
+
+    run_step_optional "Creating directory" "$(dirname "$destination")" mkdir -p "$(dirname "$destination")" || return 0
+
+    if [[ -e "$destination" ]]; then
+        if cmp -s "$source" "$destination"; then
+            run_step_optional "Refreshing file" "$destination" install -o "$owner" -g "$group" -m "$mode" "$source" "$destination" || true
+            return 0
+        fi
+
+        backup="${destination}.linux-cli-setup.${TIMESTAMP}.bak"
+        run_step_optional "Backing up" "$destination" cp -p "$destination" "$backup" || return 0
+        record_rollback_cmd "cp -p $(shell_quote "$backup") $(shell_quote "$destination")"
+    else
+        record_rollback_cmd "rm -f $(shell_quote "$destination")"
+    fi
+
+    run_step_optional "Installing file" "$destination" install -o "$owner" -g "$group" -m "$mode" "$source" "$destination" || true
+    return 0
+}
+
+apply_basic_os_hardening() {
+    local sysctl_template="$SYSCTL_TEMPLATE_DIR/99-linux-cli-setup-hardening.conf"
+
+    log "Applying basic non-obtrusive OS hardening"
+    if [[ -f "$sysctl_template" ]]; then
+        install_owned_file_optional "$sysctl_template" /etc/sysctl.d/99-linux-cli-setup-hardening.conf 0644 root root
+        run_step_optional "Applying" "sysctl hardening settings" sysctl --system || true
+    else
+        warn "Missing sysctl hardening template: $sysctl_template"
+    fi
+
+    [[ -d /tmp ]] && run_step_optional "Securing permissions" "/tmp" chmod 1777 /tmp || true
+    [[ -d /var/tmp ]] && run_step_optional "Securing permissions" "/var/tmp" chmod 1777 /var/tmp || true
+}
+
 configure_git_defaults() {
     log "Applying Git defaults for $TARGET_USER"
     run_step "Configuring" "Git init.defaultBranch" run_as_target git config --global init.defaultBranch main
@@ -1238,6 +1503,24 @@ configure_git_defaults() {
     fi
 }
 
+install_fish_function_templates() {
+    local fish_config_dir="$TARGET_HOME/.config/fish"
+    local function_name
+    local function_template
+
+    [[ "$#" -gt 0 ]] || return 0
+
+    run_step "Creating directory" "$fish_config_dir/functions" install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0755 -d "$fish_config_dir/functions"
+    for function_name in "$@"; do
+        function_template="$FISH_TEMPLATE_DIR/functions/${function_name}.fish"
+        if [[ -f "$function_template" ]]; then
+            install_owned_file "$function_template" "$fish_config_dir/functions/${function_name}.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
+        else
+            warn "Fish function template not found: $function_template"
+        fi
+    done
+}
+
 configure_fish_files() {
     local fish_config_dir="$TARGET_HOME/.config/fish"
 
@@ -1245,6 +1528,14 @@ configure_fish_files() {
     install -o "$TARGET_USER" -g "$TARGET_GROUP" -d "$fish_config_dir" "$fish_config_dir/conf.d"
     install_owned_file "$FISH_TEMPLATE_DIR/config.fish" "$fish_config_dir/config.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
     install_owned_file "$FISH_TEMPLATE_DIR/fish_plugins" "$fish_config_dir/fish_plugins" 0644 "$TARGET_USER" "$TARGET_GROUP"
+
+    if profile_is_selected comfort; then
+        install_fish_function_templates "${COMFORT_FISH_FUNCTIONS[@]}"
+    fi
+
+    if profile_is_selected wireless; then
+        install_fish_function_templates "${WIRELESS_FISH_FUNCTIONS[@]}"
+    fi
 }
 
 install_fisher_plugins() {
@@ -1259,14 +1550,66 @@ install_fisher_plugins() {
 }
 
 update_fisher_plugins() {
+    local plugin_list
+
     if ! command -v fish >/dev/null 2>&1; then
         warn "Fish is not installed; skipping Fisher plugin update"
         return
     fi
 
     log "Updating Fisher plugins for $TARGET_USER"
-    run_step "Updating" "Fisher plugins" run_as_target fish -lc 'if functions -q fisher; fisher update; else exit 0; end'
+    plugin_list="$(grep -Ev '^[[:space:]]*(#|$)' "$FISH_TEMPLATE_DIR/fish_plugins" | tr '\n' ' ')"
+    run_step "Updating" "Fisher plugins" run_as_target fish -lc "if functions -q fisher; fisher install $plugin_list; and fisher update; else exit 0; end"
     run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
+}
+
+configure_ssh_client_defaults() {
+    local ssh_dir="$TARGET_HOME/.ssh"
+    local ssh_config="$ssh_dir/config"
+    local include_line='Include ~/.ssh/conf.d/*.conf'
+    local config_backup=""
+    local config_tmp
+
+    log "Installing SSH client defaults for $TARGET_USER"
+    if ! profile_is_selected comfort; then
+        debug "Comfort profile is not selected; skipping managed SSH client defaults"
+        return
+    fi
+
+    if [[ -L "$ssh_dir" || -L "$ssh_dir/conf.d" || -L "$ssh_dir/controlmasters" ]]; then
+        warn "Skipping managed SSH defaults because $ssh_dir or one of its managed subdirectories is a symlink."
+        return
+    fi
+
+    run_step "Creating directory" "$ssh_dir" install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0700 -d "$ssh_dir" "$ssh_dir/conf.d" "$ssh_dir/controlmasters"
+    install_owned_file "$SSH_TEMPLATE_DIR/00-defaults.conf" "$ssh_dir/conf.d/00-defaults.conf" 0600 "$TARGET_USER" "$TARGET_GROUP"
+
+    if [[ -L "$ssh_config" ]]; then
+        warn "Skipping SSH include update because $ssh_config is a symlink."
+        return
+    fi
+
+    if [[ -f "$ssh_config" ]] && grep -Fxq "$include_line" "$ssh_config"; then
+        run_step "Securing file" "$ssh_config" chmod 0600 "$ssh_config"
+        run_step "Setting ownership" "$ssh_config" chown "$TARGET_USER:$TARGET_GROUP" "$ssh_config"
+        return
+    fi
+
+    config_tmp="$(mktemp)"
+    printf '%s\n' "$include_line" > "$config_tmp"
+
+    if [[ -f "$ssh_config" ]]; then
+        config_backup="${ssh_config}.linux-cli-setup.${TIMESTAMP}.bak"
+        run_step "Backing up" "$ssh_config" cp -p "$ssh_config" "$config_backup"
+        record_rollback_cmd "mv -f $(shell_quote "$config_backup") $(shell_quote "$ssh_config")"
+        printf '\n' >> "$config_tmp"
+        cat "$ssh_config" >> "$config_tmp"
+    else
+        record_rollback_cmd "rm -f $(shell_quote "$ssh_config")"
+    fi
+
+    run_step "Installing file" "$ssh_config" install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0600 "$config_tmp" "$ssh_config"
+    rm -f "$config_tmp"
 }
 
 set_default_shell() {
@@ -1328,6 +1671,69 @@ enable_arch_helpers() {
         log "Updating pkgfile database"
         run_step_optional "Updating" "pkgfile database" pkgfile -u
     fi
+}
+
+netplan_uses_networkmanager() {
+    local file
+
+    compgen -G "/etc/netplan/*.yaml" >/dev/null 2>&1 || return 1
+    for file in /etc/netplan/*.yaml; do
+        grep -Eiq '^[[:space:]]*renderer:[[:space:]]*NetworkManager[[:space:]]*$' "$file" && return 0
+    done
+
+    return 1
+}
+
+existing_network_stack_detected() {
+    if systemd_available; then
+        if systemctl is-active --quiet systemd-networkd.service 2>/dev/null ||
+            systemctl is-enabled --quiet systemd-networkd.service 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    if [[ -f /etc/network/interfaces ]] &&
+        grep -Eq '^[[:space:]]*(auto|allow-hotplug|iface)[[:space:]]+' /etc/network/interfaces; then
+        return 0
+    fi
+
+    if compgen -G "/etc/netplan/*.yaml" >/dev/null 2>&1 && ! netplan_uses_networkmanager; then
+        return 0
+    fi
+
+    return 1
+}
+
+configure_wireless_networking() {
+    if ! profile_is_selected wireless; then
+        return
+    fi
+
+    if [[ "${LINUX_CLI_ENABLE_NETWORKMANAGER:-auto}" == "0" ]]; then
+        log "LINUX_CLI_ENABLE_NETWORKMANAGER=0; skipping NetworkManager service enablement."
+        return
+    fi
+
+    if ! systemd_available; then
+        warn "systemd is unavailable; skipping NetworkManager service enablement."
+        return
+    fi
+
+    if ! systemctl list-unit-files --no-legend NetworkManager.service 2>/dev/null | grep -q '^NetworkManager\.service'; then
+        warn "NetworkManager.service was not found after package installation."
+        return
+    fi
+
+    if [[ "${LINUX_CLI_ENABLE_NETWORKMANAGER:-auto}" == "1" ]] ||
+        systemctl is-active --quiet NetworkManager.service 2>/dev/null ||
+        systemctl is-enabled --quiet NetworkManager.service 2>/dev/null ||
+        ! existing_network_stack_detected; then
+        log "Enabling and starting NetworkManager for the wireless profile"
+        run_step_optional "Enabling service" "NetworkManager.service" systemctl enable --now NetworkManager.service || true
+        return
+    fi
+
+    warn "Existing network configuration was detected; not enabling NetworkManager automatically. Set LINUX_CLI_ENABLE_NETWORKMANAGER=1 to force it."
 }
 
 enable_docker_service_and_group() {
@@ -1460,6 +1866,104 @@ update_dev_tools() {
 
     log "Upgrading pipx-installed Python tools for $TARGET_USER"
     run_step_optional "Updating" "pipx-installed Python tools" run_as_target pipx upgrade-all
+}
+
+target_command_exists() {
+    local command_name="$1"
+
+    # shellcheck disable=SC2016
+    run_as_target bash -lc 'PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"; command -v "$1" >/dev/null 2>&1' bash "$command_name"
+}
+
+target_has_cargo() {
+    target_command_exists cargo
+}
+
+target_has_pipx() {
+    target_command_exists pipx
+}
+
+install_cargo_tool_if_missing() {
+    local command_name="$1"
+    local crate_name="$2"
+
+    if target_command_exists "$command_name"; then
+        debug "Comfort tool $command_name is already available"
+        return 0
+    fi
+
+    if ! target_has_cargo; then
+        warn "cargo is unavailable; skipping fallback install for $command_name"
+        return 0
+    fi
+
+    # shellcheck disable=SC2016
+    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "cargo tool $crate_name" \
+        run_as_target bash -lc 'PATH="$HOME/.cargo/bin:$PATH"; cargo install --locked "$1"' bash "$crate_name"; then
+        record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin") cargo uninstall $(shell_quote "$crate_name")"
+    fi
+}
+
+install_pipx_tool_if_missing() {
+    local command_name="$1"
+    local package_name="$2"
+
+    if target_command_exists "$command_name"; then
+        debug "Comfort tool $command_name is already available"
+        return 0
+    fi
+
+    if ! target_has_pipx; then
+        warn "pipx is unavailable; skipping fallback install for $command_name"
+        return 0
+    fi
+
+    run_step_optional "Configuring" "pipx user path" run_as_target pipx ensurepath
+    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "pipx tool $package_name" run_as_target pipx install "$package_name"; then
+        record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin") pipx uninstall $(shell_quote "$package_name")"
+    fi
+}
+
+install_comfort_fallback_tools() {
+    local tool_pair
+    local command_name
+    local package_name
+    local -a cargo_tools=(
+        "atuin:atuin"
+        "zoxide:zoxide"
+        "mise:mise"
+        "just:just"
+        "watchexec:watchexec-cli"
+        "hyperfine:hyperfine"
+        "tldr:tealdeer"
+        "jless:jless"
+        "delta:git-delta"
+        "difft:difftastic"
+        "rga:ripgrep_all"
+        "yazi:yazi-fm"
+        "zellij:zellij"
+    )
+    local -a pipx_tools=(
+        "http:httpie"
+        "trash-put:trash-cli"
+    )
+
+    log "Checking comfort tool fallbacks for $TARGET_USER"
+    for tool_pair in "${cargo_tools[@]}"; do
+        command_name="${tool_pair%%:*}"
+        package_name="${tool_pair#*:}"
+        install_cargo_tool_if_missing "$command_name" "$package_name"
+    done
+
+    for tool_pair in "${pipx_tools[@]}"; do
+        command_name="${tool_pair%%:*}"
+        package_name="${tool_pair#*:}"
+        install_pipx_tool_if_missing "$command_name" "$package_name"
+    done
+}
+
+install_comfort_tools() {
+    install_comfort_fallback_tools
 }
 
 install_status_commands() {

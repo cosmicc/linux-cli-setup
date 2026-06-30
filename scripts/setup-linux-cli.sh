@@ -46,6 +46,10 @@ install_selected_profiles() {
 
         install_profile_packages "$profile"
 
+        if [[ "$profile" == "comfort" ]]; then
+            install_comfort_tools
+        fi
+
         if [[ "$profile" == "dev" ]]; then
             install_dev_tools
         fi
@@ -90,15 +94,20 @@ main() {
     install_selected_profiles
     install_jetbrains_nerd_font_from_package_or_release
     enable_openssh_service
+    configure_ufw_firewall
     enable_arch_helpers
+    configure_wireless_networking
     configure_time_sync
+    apply_basic_os_hardening
     install_status_commands
     install_auto_update_service
     configure_git_defaults
     configure_fish_files
+    configure_ssh_client_defaults
     install_fisher_plugins
     set_default_shell
     install_motd
+    cleanup_unused_packages_and_cache
     write_install_state "$(selected_profiles_csv)" "$ORIGINAL_SHELL"
     commit_transaction
     trap - ERR
