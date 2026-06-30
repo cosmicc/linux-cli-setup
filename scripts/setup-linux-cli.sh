@@ -13,13 +13,13 @@ show_help() {
     cat <<'HELP'
 Usage: sudo ./install.sh [options]
 
-Install the core Linux CLI setup and optional profiles.
+Install the core Linux CLI setup and optional package groups.
 
 Options:
-  --profile NAME[,NAME]   Install one or more profiles in addition to core.
+  --profile NAME[,NAME]   Install one or more groups in addition to core.
   --profiles NAME[,NAME]  Alias for --profile.
-  --all-profiles          Install every profile.
-  --list-profiles         Show available profiles.
+  --all-profiles          Install every supported group.
+  --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.
   --version               Show version.
@@ -29,6 +29,9 @@ Environment:
   TARGET_USER=username                 Use when running directly as root.
   LINUX_CLI_KEEP_DEFAULT_MOTD=1        Do not disable existing MOTD snippets.
   LINUX_CLI_DOCKER_APT_SOURCE=distro   Use distro Docker packages instead of Docker's official apt repo.
+
+If no group option is provided and the script is running in an interactive
+terminal, install asks which optional groups to add. Core is always installed.
 HELP
 }
 
@@ -70,11 +73,13 @@ main() {
 
     require_root
     init_logging install
+    self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     start_transaction
     trap transaction_error_trap ERR
     init_runtime_context
     PACKAGE_STEP_VERB="Installing"
     export PACKAGE_STEP_VERB
+    prompt_for_install_profiles
 
     log "Detected package family: $PACKAGE_FAMILY"
     log "Target user: $TARGET_USER"

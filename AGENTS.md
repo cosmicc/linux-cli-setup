@@ -10,6 +10,7 @@ This project provides root-run Linux setup, update, and uninstall scripts for CL
 
 - `install.sh`, `update.sh`, and `uninstall.sh` are root entry points. Keep them small wrappers.
 - `VERSION` is the project version source. Update it with every release or prerelease.
+- `data/package-groups.tsv` is the editable package group map. Scripts read package names from this file at runtime.
 - `scripts/setup-linux-cli.sh` contains the install flow.
 - `scripts/update-linux-cli.sh` contains the update flow.
 - `scripts/uninstall-linux-cli.sh` contains the uninstall flow.
@@ -20,7 +21,7 @@ This project provides root-run Linux setup, update, and uninstall scripts for CL
 - `templates/auto-update/` contains the installed automatic update script and root-only config template.
 - `templates/systemd/` and `templates/cron/` contain automatic update scheduling templates.
 - `README.md` is the user-facing overview and usage guide.
-- `CHANGELOG.md` records notable changes because this project is not currently versioned.
+- `CHANGELOG.md` records notable changes for each version and unreleased change set.
 
 ## Profile Contract
 
@@ -37,6 +38,10 @@ Do not collapse this project into one giant "install everything" profile. Keep `
 
 `install.sh` and `update.sh` always include `core`; optional profiles are selected with `--profile`, `--profiles`, or `--all-profiles`. `uninstall.sh --remove-packages` does not implicitly add `core`, because package removal is destructive.
 
+When `install.sh` is run interactively without an explicit profile option, it prompts for `dev`, `netops`, `docker`, and `desktop`; do not prompt for `core`. Keep `diagnostics` available for backward-compatible explicit use with `--profile diagnostics`, but do not include it in the default interactive prompt unless the user asks for it.
+
+Keep `core` first in install and update execution order and in saved state. `update.sh` should use the profiles saved by install when no explicit profile option is provided, read the current package group map, and install missing packages for those saved profiles. `uninstall.sh --remove-packages` should default to saved optional profiles, skip `core`, and avoid removing packages that belong to retained profiles.
+
 ## Installer Contract
 
 - The installer must be run as root, normally through `sudo ./install.sh`.
@@ -47,9 +52,12 @@ Do not collapse this project into one giant "install everything" profile. Keep `
 - Existing user Fish files must be backed up before replacement unless the installed file already matches the project template.
 - Fish should become the target user's default shell through `/etc/shells` plus `chsh` or `usermod`.
 - Install state belongs in `/var/lib/linux-cli-setup/install.env`; preserve the originally saved shell across updates.
+- Package group contents belong in `data/package-groups.tsv`, not hardcoded shell case blocks. The file uses tab-separated columns for group, tier, Arch packages, Debian/Ubuntu packages, and notes.
 - Script logs belong in `/var/log/linux-cli-setup/`; create one log file per install, update, uninstall, or auto-update execution.
 - Package-manager output must stay suppressed by default. Console output should show each item being installed, updated, or uninstalled, with colored status lines unless `--no-color` is passed.
 - Executable script options must use long `--option` names only. Keep `--help` and `--version` on executable scripts.
+- After root detection and log initialization, install, update, and uninstall must check GitHub releases and prereleases for a newer project version before making system changes. If a newer version is available, fetch and pull from the trusted `cosmicc/linux-cli-setup` `origin/main`, show Git progress, create a temporary restart wrapper under `/tmp`, and exec the same entrypoint with the original arguments. Keep `LINUX_CLI_SELF_UPDATE_RESTARTED=1` as the loop guard.
+- Self-update version ordering must support alpha and beta prerelease labels such as `0.1a` and `0.5b`, with final releases such as `v1.0` ranking after prereleases at the same numeric version. Do not auto-update from an unexpected GitHub remote.
 - `--debug` must show captured command output and command details in both console and log files.
 - Required install/update failures must print the error and the last captured output for the failing item, then roll back managed changes from that run. Package-manager system upgrades are not fully reversible; document that limit instead of pretending otherwise.
 - Uninstall must keep going after individual errors and report warnings instead of aborting the whole run.
@@ -57,7 +65,7 @@ Do not collapse this project into one giant "install everything" profile. Keep `
 
 ## Package Recommendations
 
-Keep these package mappings aligned across code and README.
+Keep these package mappings aligned with `data/package-groups.tsv`. The TSV file is authoritative for script behavior; these tables are explanatory documentation.
 
 ### Core
 
@@ -76,6 +84,7 @@ Core always includes OpenSSH, Git, Fish, htop, btop, JetBrainsMono Nerd Font Mon
 | Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tldr` |
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | `chezmoi` |
+| Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
 
 Arch-specific core additions are `pacman-contrib`, `reflector`, `pkgfile`, and `base-devel`. Enable `paccache.timer` and run `pkgfile -u` when available.
 

@@ -1,8 +1,8 @@
 # Linux CLI Setup
 
-Profile-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. The default install is a safe `core` CLI baseline; heavier roles such as development, network troubleshooting, diagnostics, Docker hosting, and desktop helpers are opt-in profiles.
+Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. The default install is a safe `core` CLI baseline; heavier roles such as development, network troubleshooting, Docker hosting, and desktop helpers are optional package groups.
 
-Current prerelease: `0.1a` alpha.
+Current alpha testing version: `0.2a`.
 
 ## Supported Systems
 
@@ -17,15 +17,15 @@ Run from the user account that should receive Fish as the default shell:
 sudo ./install.sh
 ```
 
-The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
+In an interactive terminal, install asks whether to add `dev`, `netops`, `docker`, and `desktop`. `core` is always installed and is not prompted. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
 
 ```bash
 TARGET_USER=myuser ./install.sh
 ```
 
-## Profiles
+## Package Groups
 
-`core` is always included. Add optional profiles with `--profile` or install everything with `--all-profiles`.
+`core` is always included. Add optional groups noninteractively with `--profile` or install every supported group with `--all-profiles`.
 
 ```bash
 sudo ./install.sh --profile dev,netops
@@ -33,7 +33,11 @@ sudo ./install.sh --profile docker
 sudo ./install.sh --all-profiles
 ```
 
+Package names are read from [data/package-groups.tsv](data/package-groups.tsv). Edit that file to change which Arch or Debian/Ubuntu packages belong to each group.
+
 Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
+
+Before install, update, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is.
 
 Show the script version:
 
@@ -50,7 +54,7 @@ Available profiles:
 | `core` | Always-installed CLI baseline, Fish prompt, Git defaults, MOTD, and distro helpers. |
 | `dev` | Python, C/C++ build tools, Neovim, uv, pipx tools, and developer Git helpers. |
 | `netops` | DNS, packet capture, port scanning, VPN, SSH, transfer, and MSP troubleshooting tools. |
-| `diagnostics` | Hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics. |
+| `diagnostics` | Hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics. Explicit-only for compatibility. |
 | `docker` | Docker host packages, Compose plugin, Docker CLI helpers, and Fish Docker aliases. |
 | `desktop` | GUI workstation clipboard, desktop integration, and notification helpers. |
 
@@ -73,6 +77,7 @@ It also adds common CLI tools:
 | Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tldr` |
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | `chezmoi` |
+| Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
 
 Some recommended packages are installed best-effort because older distro releases may not ship every package.
 
@@ -180,7 +185,7 @@ Refresh packages, managed Fish config, Fisher plugins, Tide settings, and MOTD:
 sudo ./update.sh
 ```
 
-If no profile is given, `update.sh` uses the profiles saved by the last install. You can also specify profiles:
+If no group is given, `update.sh` uses the groups saved by the last install. It reads the current package map and installs any missing packages from those saved groups. You can also specify groups:
 
 ```bash
 sudo ./update.sh --profile dev,docker
@@ -196,9 +201,10 @@ Remove linux-cli-setup managed Fish and MOTD files:
 sudo ./uninstall.sh
 ```
 
-The default uninstall preserves installed packages and restores the saved pre-install shell when state is available. Package removal is explicit:
+The default uninstall preserves installed packages and restores the saved pre-install shell when state is available. Package removal is explicit. Without a `--profile` selection, `--remove-packages` removes the optional groups saved by install, but leaves all `core` packages installed:
 
 ```bash
+sudo ./uninstall.sh --remove-packages
 sudo ./uninstall.sh --remove-packages --profile docker
 ```
 

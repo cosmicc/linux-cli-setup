@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2a - 2026-06-30
+
+### Added
+
+- Added `data/package-groups.tsv` as the editable source for package group mappings across Arch and Debian/Ubuntu.
+- Added an interactive install prompt for optional `dev`, `netops`, `docker`, and `desktop` groups when no explicit group option is provided.
+- Added a GitHub release/prerelease self-update check for install, update, and uninstall scripts before they make system changes.
+
+### Changed
+
+- Changed install and update ordering so `core` always runs first and saved state keeps `core` first.
+- Changed update behavior to read saved install groups and install missing packages from the current package group map.
+- Changed package uninstall behavior so `--remove-packages` defaults to saved optional groups, always leaves `core` packages installed, and skips packages that belong to retained saved groups.
+- Changed root entrypoint wrappers to preserve the original script path so self-updates can restart the same command after pulling the newer release.
+
 ## 0.1a - 2026-06-30
 
 Alpha prerelease for initial private testing.

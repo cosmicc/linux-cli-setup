@@ -1,0 +1,23 @@
+# Package group mapping for linux-cli-setup.
+#
+# Columns are tab-separated:
+# group    tier    arch_packages    debian_ubuntu_packages    notes
+#
+# Tiers:
+# required          A failed install stops install/update and triggers rollback.
+# recommended       Best-effort install; unavailable packages are skipped with a warning.
+# required_distro   Debian/Ubuntu Docker distro-package fallback only.
+# recommended_distro Debian/Ubuntu Docker distro-package fallback only.
+#
+# Use "-" when a distro has no package for that row. Package names within a
+# distro column are space-separated.
+core	required	base-devel ca-certificates curl wget gnupg git openssh fish htop btop unzip zip p7zip tar gzip xz tmux fontconfig	ca-certificates curl wget gnupg git openssh-server fish htop btop unzip zip p7zip-full tar gzip xz-utils tmux fontconfig systemd-timesyncd	Core CLI baseline and shell requirements.
+core	recommended	ripgrep fd fzf plocate bat eza tree less jq yq ncdu duf dust lnav man-db man-pages tldr fastfetch inxi git-delta pacman-contrib reflector pkgfile chezmoi ttf-jetbrains-mono-nerd	ripgrep fd-find fzf plocate bat eza tree less jq yq ncdu duf lnav man-db manpages tldr fastfetch inxi git-delta apt-file needrestart debian-goodies software-properties-common apt-transport-https unattended-upgrades nala chezmoi	Common CLI helpers, distro maintenance tools, and the Arch Nerd Font package.
+dev	recommended	python python-pip python-pipx uv base-devel cmake pkgconf neovim	python3 python3-pip python3-venv pipx build-essential cmake pkg-config neovim	Coding, Python, and C/C++ tools.
+netops	recommended	bind iproute2 iputils traceroute mtr tcpdump wireshark-cli nmap iperf3 ethtool lsof whois openbsd-netcat socat arp-scan smbclient net-snmp wireguard-tools openvpn mosh sshfs rsync rclone fail2ban	dnsutils iproute2 iputils-ping traceroute mtr-tiny tcpdump tshark nmap iperf3 ethtool lsof whois netcat-openbsd socat arp-scan smbclient snmp snmp-mibs-downloader wireguard-tools openvpn mosh sshfs rsync rclone fail2ban	IT, security, and network troubleshooting tools.
+diagnostics	recommended	pciutils usbutils lshw dmidecode lm_sensors smartmontools nvme-cli parted gptfdisk iotop sysstat iftop nethogs strace lsof psmisc	pciutils usbutils lshw dmidecode lm-sensors smartmontools nvme-cli parted gdisk iotop sysstat iftop nethogs strace lsof psmisc	Hardware, disk, sensor, I/O, network usage, and tracing diagnostics.
+docker	required	docker docker-compose	docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin	Docker host packages; Debian/Ubuntu defaults to Docker's official repository.
+docker	required_distro	-	docker.io	Debian/Ubuntu Docker fallback when LINUX_CLI_DOCKER_APT_SOURCE=distro or the official repository is unavailable.
+docker	recommended	lazydocker dive ctop hadolint	lazydocker dive ctop hadolint	Docker CLI helper tools.
+docker	recommended_distro	-	docker-compose-plugin	Debian/Ubuntu Docker fallback helper package.
+desktop	recommended	xclip wl-clipboard xsel xdg-utils libnotify	xclip wl-clipboard xsel xdg-utils libnotify-bin	GUI workstation clipboard, desktop integration, and notification helpers.

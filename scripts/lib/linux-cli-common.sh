@@ -13,14 +13,18 @@ AUTO_UPDATE_TEMPLATE_DIR="$PROJECT_ROOT/templates/auto-update"
 BIN_TEMPLATE_DIR="$PROJECT_ROOT/templates/bin"
 SYSTEMD_TEMPLATE_DIR="$PROJECT_ROOT/templates/systemd"
 CRON_TEMPLATE_DIR="$PROJECT_ROOT/templates/cron"
+PACKAGE_GROUPS_FILE="$PROJECT_ROOT/data/package-groups.tsv"
 STATE_DIR="/var/lib/linux-cli-setup"
 STATE_FILE="$STATE_DIR/install.env"
 CONFIG_DIR="/etc/linux-cli-setup"
 AUTO_UPDATE_CONFIG="/etc/linux-cli-setup/auto-update.conf"
 LOG_DIR="/var/log/linux-cli-setup"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+EXPECTED_GITHUB_REPO="${LINUX_CLI_SELF_UPDATE_REPO:-cosmicc/linux-cli-setup}"
+SELF_UPDATE_BRANCH="${LINUX_CLI_SELF_UPDATE_BRANCH:-main}"
 
 SUPPORTED_PROFILES=(core dev netops diagnostics docker desktop)
+INSTALL_PROMPT_PROFILES=(dev netops docker desktop)
 SELECTED_PROFILES=()
 PROFILES_EXPLICIT=0
 PROFILE_POSITIONAL_ARGS=()
@@ -31,6 +35,7 @@ CURRENT_STEP_OUTPUT=""
 ROLLBACK_FILE=""
 ROLLBACK_ENABLED=0
 ROLLBACK_RUNNING=0
+SELF_UPDATE_RUN_USER=""
 
 if [[ -n "${NO_COLOR:-}" || "${TERM:-}" == "dumb" ]]; then
     USE_COLOR=0
@@ -166,6 +171,15 @@ shell_quote() {
     printf '%q' "$1"
 }
 
+trim_string() {
+    local value="$1"
+
+    value="${value//$'\r'/}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
 start_transaction() {
     ROLLBACK_FILE="$(mktemp)"
     ROLLBACK_ENABLED=1
@@ -222,11 +236,302 @@ project_version() {
         return
     fi
 
-    printf '0.1a'
+    printf '0.2a'
 }
 
 print_version() {
     printf 'linux-cli-setup %s\n' "$(project_version)"
+}
+
+version_sort_key() {
+    local raw="$1"
+    local suffix=""
+    local suffix_name=""
+    local suffix_number=0
+    local stage_rank=3
+    local major=0
+    local minor=0
+    local patch=0
+
+    raw="${raw#v}"
+    raw="${raw#V}"
+
+    if [[ "$raw" =~ ^([0-9]+)(\.([0-9]+))?(\.([0-9]+))?([[:alpha:]]+[0-9]*)?$ ]]; then
+        major="${BASH_REMATCH[1]}"
+        minor="${BASH_REMATCH[3]:-0}"
+        patch="${BASH_REMATCH[5]:-0}"
+        suffix="${BASH_REMATCH[6]:-}"
+    else
+        return 1
+    fi
+
+    if [[ -n "$suffix" ]]; then
+        suffix_name="${suffix//[0-9]/}"
+        suffix_number="${suffix//[!0-9]/}"
+        suffix_number="${suffix_number:-0}"
+
+        case "${suffix_name,,}" in
+            a|alpha)
+                stage_rank=0
+                ;;
+            b|beta)
+                stage_rank=1
+                ;;
+            rc)
+                stage_rank=2
+                ;;
+            *)
+                stage_rank=2
+                ;;
+        esac
+    fi
+
+    printf '%06d.%06d.%06d.%02d.%06d\n' \
+        "$major" "$minor" "$patch" "$stage_rank" "$suffix_number"
+}
+
+version_is_newer() {
+    local candidate="$1"
+    local current="$2"
+    local candidate_key
+    local current_key
+
+    candidate_key="$(version_sort_key "$candidate")" || return 1
+    current_key="$(version_sort_key "$current")" || return 1
+
+    [[ "$candidate_key" > "$current_key" ]]
+}
+
+github_repo_from_remote_url() {
+    local remote_url="$1"
+    local repo=""
+
+    case "$remote_url" in
+        https://github.com/*)
+            repo="${remote_url#https://github.com/}"
+            ;;
+        git@github.com:*)
+            repo="${remote_url#git@github.com:}"
+            ;;
+        ssh://git@github.com/*)
+            repo="${remote_url#ssh://git@github.com/}"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    repo="${repo%.git}"
+    repo="${repo%%/*/*/*}"
+    printf '%s\n' "$repo"
+}
+
+detect_self_update_run_user() {
+    local owner=""
+
+    owner="$(stat -c '%U' "$PROJECT_ROOT/.git" 2>/dev/null || true)"
+    if [[ -n "$owner" && "$owner" != "root" && "$owner" != "UNKNOWN" ]] && id "$owner" >/dev/null 2>&1; then
+        printf '%s\n' "$owner"
+    fi
+}
+
+self_update_command() {
+    local run_home
+
+    if [[ -n "${SELF_UPDATE_RUN_USER:-}" ]]; then
+        run_home="$(getent passwd "$SELF_UPDATE_RUN_USER" | cut -d: -f6)"
+        runuser -u "$SELF_UPDATE_RUN_USER" -- env \
+            HOME="$run_home" \
+            USER="$SELF_UPDATE_RUN_USER" \
+            LOGNAME="$SELF_UPDATE_RUN_USER" \
+            "$@"
+        return
+    fi
+
+    "$@"
+}
+
+release_tags_from_github_cli() {
+    local repo_slug="$1"
+
+    command -v gh >/dev/null 2>&1 || return 1
+    self_update_command gh release list \
+        --repo "$repo_slug" \
+        --limit 100 \
+        --json tagName,isDraft \
+        --jq '.[] | select(.isDraft == false) | .tagName' 2>/dev/null
+}
+
+release_tags_from_git_remote() {
+    local remote="$1"
+
+    self_update_command git -C "$PROJECT_ROOT" ls-remote --tags --refs "$remote" 'v*' '[0-9]*' 2>/dev/null |
+        awk '{ sub("^refs/tags/", "", $2); print $2 }'
+}
+
+newest_version_tag_from_list() {
+    local tag
+    local version
+    local newest_tag=""
+    local newest_version=""
+
+    while IFS= read -r tag; do
+        tag="$(trim_string "$tag")"
+        [[ -n "$tag" ]] || continue
+        version="${tag#v}"
+        version="${version#V}"
+        version_sort_key "$version" >/dev/null || continue
+
+        if [[ -z "$newest_tag" ]] || version_is_newer "$version" "$newest_version"; then
+            newest_tag="$tag"
+            newest_version="$version"
+        fi
+    done
+
+    [[ -n "$newest_tag" ]] || return 1
+    printf '%s\n' "$newest_tag"
+}
+
+latest_github_release_tag() {
+    local remote="$1"
+    local remote_url="$2"
+    local repo_slug
+    local tag_list
+
+    repo_slug="$(github_repo_from_remote_url "$remote_url" || true)"
+    [[ -n "$repo_slug" ]] || return 1
+
+    tag_list="$(release_tags_from_github_cli "$repo_slug" || true)"
+    if [[ -n "$tag_list" ]]; then
+        newest_version_tag_from_list <<< "$tag_list"
+        return
+    fi
+
+    tag_list="$(release_tags_from_git_remote "$remote" || true)"
+    [[ -n "$tag_list" ]] || return 1
+    newest_version_tag_from_list <<< "$tag_list"
+}
+
+run_visible_self_update_step() {
+    local action="$1"
+    shift
+    local rc=0
+
+    console_line blue "[linux-cli-setup] ${action}"
+    debug "Command: $*"
+
+    if [[ -n "$LOG_FILE" ]]; then
+        self_update_command "$@" 2>&1 | tee -a "$LOG_FILE"
+        rc="${PIPESTATUS[0]}"
+    else
+        self_update_command "$@"
+        rc="$?"
+    fi
+
+    if [[ "$rc" -ne 0 ]]; then
+        error "${action} failed (exit $rc)"
+        return "$rc"
+    fi
+
+    success "${action} complete"
+}
+
+worktree_has_local_changes() {
+    ! self_update_command git -C "$PROJECT_ROOT" diff --quiet --ignore-submodules -- ||
+        ! self_update_command git -C "$PROJECT_ROOT" diff --cached --quiet --ignore-submodules --
+}
+
+create_self_update_restart_wrapper() {
+    local entrypoint="$1"
+    shift
+    local wrapper
+    local arg
+
+    wrapper="$(mktemp /tmp/linux-cli-setup-restart.XXXXXX)"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'set -euo pipefail\n'
+        printf 'cd %q\n' "$PROJECT_ROOT"
+        printf 'export LINUX_CLI_SELF_UPDATE_RESTARTED=1\n'
+        printf 'exec %q' "$entrypoint"
+        for arg in "$@"; do
+            printf ' %q' "$arg"
+        done
+        printf '\n'
+    } > "$wrapper"
+    chmod 0700 "$wrapper"
+    printf '%s\n' "$wrapper"
+}
+
+self_update_if_newer() {
+    local entrypoint="$1"
+    shift || true
+    local remote="${LINUX_CLI_SELF_UPDATE_REMOTE:-origin}"
+    local remote_url
+    local remote_repo
+    local current_version
+    local latest_tag
+    local latest_version
+    local restart_wrapper
+
+    [[ "${LINUX_CLI_SKIP_SELF_UPDATE:-0}" != "1" ]] || return 0
+    [[ "${LINUX_CLI_SELF_UPDATE_RESTARTED:-0}" != "1" ]] || return 0
+
+    if ! command -v git >/dev/null 2>&1 || [[ ! -d "$PROJECT_ROOT/.git" ]]; then
+        warn "Git checkout not available; skipping self-update check."
+        return 0
+    fi
+
+    SELF_UPDATE_RUN_USER="$(detect_self_update_run_user)"
+    if [[ -n "$SELF_UPDATE_RUN_USER" ]]; then
+        debug "Running self-update Git commands as $SELF_UPDATE_RUN_USER"
+    fi
+
+    remote_url="$(self_update_command git -C "$PROJECT_ROOT" remote get-url "$remote" 2>/dev/null || true)"
+    if [[ -z "$remote_url" ]]; then
+        warn "Git remote '$remote' is not configured; skipping self-update check."
+        return 0
+    fi
+
+    remote_repo="$(github_repo_from_remote_url "$remote_url" || true)"
+    if [[ "$remote_repo" != "$EXPECTED_GITHUB_REPO" ]]; then
+        warn "Remote '$remote' does not point to $EXPECTED_GITHUB_REPO; skipping self-update check."
+        return 0
+    fi
+
+    log "Checking GitHub releases for a newer linux-cli-setup version."
+    current_version="$(project_version)"
+    latest_tag="$(latest_github_release_tag "$remote" "$remote_url" || true)"
+
+    if [[ -z "$latest_tag" ]]; then
+        warn "Could not find a GitHub release or prerelease tag; continuing with version $current_version."
+        return 0
+    fi
+
+    latest_version="${latest_tag#v}"
+    latest_version="${latest_version#V}"
+    if ! version_is_newer "$latest_version" "$current_version"; then
+        log "Running version $current_version is current."
+        return 0
+    fi
+
+    console_line yellow "[linux-cli-setup] New version detected: $latest_version (running $current_version)."
+    console_line yellow "[linux-cli-setup] Downloading the newest release from GitHub with progress shown below."
+
+    if worktree_has_local_changes; then
+        die "Local tracked changes are present in $PROJECT_ROOT. Commit or stash them before self-updating."
+    fi
+
+    run_visible_self_update_step "Downloading release metadata from GitHub" \
+        git -C "$PROJECT_ROOT" fetch --progress --tags "$remote" ||
+        die "Self-update failed while downloading release metadata."
+    run_visible_self_update_step "Pulling latest linux-cli-setup from GitHub" \
+        git -C "$PROJECT_ROOT" pull --ff-only --progress "$remote" "$SELF_UPDATE_BRANCH" ||
+        die "Self-update failed while pulling the latest release."
+
+    restart_wrapper="$(create_self_update_restart_wrapper "$entrypoint" "$@")"
+    console_line yellow "[linux-cli-setup] Restarting the script with linux-cli-setup $latest_version."
+    exec "$restart_wrapper"
 }
 
 require_root() {
@@ -376,6 +681,18 @@ add_profile_csv() {
     done
 }
 
+ensure_core_profile_first() {
+    local selected_profile
+    local reordered_profiles=(core)
+
+    for selected_profile in "${SELECTED_PROFILES[@]}"; do
+        [[ "$selected_profile" == "core" ]] && continue
+        reordered_profiles+=("$selected_profile")
+    done
+
+    SELECTED_PROFILES=("${reordered_profiles[@]}")
+}
+
 parse_profile_selection() {
     local include_core="$1"
     shift
@@ -436,14 +753,68 @@ parse_profile_selection() {
     fi
 
     if [[ "$include_core" == "1" ]]; then
-        if [[ "${#SELECTED_PROFILES[@]}" -eq 0 ]]; then
-            SELECTED_PROFILES=(core)
-        else
-            add_profile core
-        fi
+        ensure_core_profile_first
     fi
 
     export PROFILES_EXPLICIT
+}
+
+prompt_text() {
+    local message="$1"
+
+    if [[ "$USE_COLOR" -eq 1 ]]; then
+        printf '%b' "$(color_code cyan)${message}$(color_code reset)"
+    else
+        printf '%s' "$message"
+    fi
+
+    if [[ -n "$LOG_FILE" ]]; then
+        printf '%s\n' "$message" >> "$LOG_FILE"
+    fi
+}
+
+ask_yes_no() {
+    local message="$1"
+    local answer
+
+    while true; do
+        prompt_text "$message [y/N]: "
+        IFS= read -r answer
+        answer="$(trim_string "$answer")"
+
+        case "${answer,,}" in
+            y|yes)
+                [[ -n "$LOG_FILE" ]] && printf '[linux-cli-setup] ANSWER: yes\n' >> "$LOG_FILE"
+                return 0
+                ;;
+            ""|n|no)
+                [[ -n "$LOG_FILE" ]] && printf '[linux-cli-setup] ANSWER: no\n' >> "$LOG_FILE"
+                return 1
+                ;;
+            *)
+                console_line yellow "[linux-cli-setup] Please answer yes or no."
+                ;;
+        esac
+    done
+}
+
+prompt_for_install_profiles() {
+    local profile
+
+    [[ "$PROFILES_EXPLICIT" -eq 0 ]] || return 0
+    add_profile core
+
+    if [[ ! -t 0 ]]; then
+        log "No interactive terminal detected; installing core only. Use --profile or --all-profiles to select optional groups."
+        return 0
+    fi
+
+    log "Core is always installed. Choose optional package groups to add."
+    for profile in "${INSTALL_PROMPT_PROFILES[@]}"; do
+        if ask_yes_no "[linux-cli-setup] Install $profile ($(profile_description "$profile"))?"; then
+            add_profile "$profile"
+        fi
+    done
 }
 
 selected_profiles_csv() {
@@ -540,74 +911,79 @@ append_shell_if_missing() {
     fi
 }
 
-required_packages_for_profile() {
-    local family="$1"
-    local profile="$2"
+package_tier_matches() {
+    local row_tier="$1"
+    local requested_tier="$2"
 
-    case "$family:$profile" in
-        arch:core)
-            printf '%s\n' base-devel ca-certificates curl wget gnupg git openssh fish htop btop unzip zip p7zip tar gzip xz tmux fontconfig
-            ;;
-        debian:core)
-            printf '%s\n' ca-certificates curl wget gnupg git openssh-server fish htop btop unzip zip p7zip-full tar gzip xz-utils tmux fontconfig systemd-timesyncd
-            ;;
-        arch:docker)
-            printf '%s\n' docker docker-compose
-            ;;
-        debian:docker)
-            printf '%s\n' docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker.io
+    case "$requested_tier" in
+        all)
+            [[ "$row_tier" == "required" || "$row_tier" == "recommended" || "$row_tier" == "required_distro" || "$row_tier" == "recommended_distro" ]]
             ;;
         *)
-            return 0
+            [[ "$row_tier" == "$requested_tier" ]]
             ;;
     esac
 }
 
-recommended_packages_for_profile() {
+packages_for_profile_tier() {
     local family="$1"
     local profile="$2"
+    local requested_tier="$3"
+    local group
+    local tier
+    local arch_packages
+    local debian_packages
+    local _notes
+    local packages
+    local package
 
-    case "$family:$profile" in
-        arch:core)
-            printf '%s\n' ripgrep fd fzf plocate bat eza tree less jq yq ncdu duf dust lnav man-db man-pages tldr fastfetch inxi git-delta pacman-contrib reflector pkgfile chezmoi
-            ;;
-        debian:core)
-            printf '%s\n' ripgrep fd-find fzf plocate bat eza tree less jq yq ncdu duf lnav man-db manpages tldr fastfetch inxi git-delta apt-file needrestart debian-goodies software-properties-common apt-transport-https unattended-upgrades nala chezmoi
-            ;;
-        arch:dev)
-            printf '%s\n' python python-pip python-pipx uv base-devel cmake pkgconf neovim
-            ;;
-        debian:dev)
-            printf '%s\n' python3 python3-pip python3-venv pipx build-essential cmake pkg-config neovim
-            ;;
-        arch:netops)
-            printf '%s\n' bind iproute2 iputils traceroute mtr tcpdump wireshark-cli nmap iperf3 ethtool lsof whois openbsd-netcat socat arp-scan smbclient net-snmp wireguard-tools openvpn mosh sshfs rsync rclone fail2ban
-            ;;
-        debian:netops)
-            printf '%s\n' dnsutils iproute2 iputils-ping traceroute mtr-tiny tcpdump tshark nmap iperf3 ethtool lsof whois netcat-openbsd socat arp-scan smbclient snmp snmp-mibs-downloader wireguard-tools openvpn mosh sshfs rsync rclone fail2ban
-            ;;
-        arch:diagnostics)
-            printf '%s\n' pciutils usbutils lshw dmidecode lm_sensors smartmontools nvme-cli parted gptfdisk iotop sysstat iftop nethogs strace lsof psmisc
-            ;;
-        debian:diagnostics)
-            printf '%s\n' pciutils usbutils lshw dmidecode lm-sensors smartmontools nvme-cli parted gdisk iotop sysstat iftop nethogs strace lsof psmisc
-            ;;
-        arch:docker)
-            printf '%s\n' lazydocker dive ctop hadolint
-            ;;
-        debian:docker)
-            printf '%s\n' lazydocker dive ctop hadolint
-            ;;
-        arch:desktop)
-            printf '%s\n' xclip wl-clipboard xsel xdg-utils libnotify
-            ;;
-        debian:desktop)
-            printf '%s\n' xclip wl-clipboard xsel xdg-utils libnotify-bin
-            ;;
-        *)
-            return 0
-            ;;
-    esac
+    [[ -f "$PACKAGE_GROUPS_FILE" ]] || die "Package group file not found: $PACKAGE_GROUPS_FILE"
+
+    while IFS=$'\t' read -r group tier arch_packages debian_packages _notes || [[ -n "${group:-}" ]]; do
+        group="$(trim_string "${group:-}")"
+        [[ -z "$group" || "${group:0:1}" == "#" ]] && continue
+
+        tier="$(trim_string "${tier:-}")"
+        [[ "$group" == "$profile" ]] || continue
+        package_tier_matches "$tier" "$requested_tier" || continue
+
+        case "$family" in
+            arch)
+                packages="$(trim_string "${arch_packages:-}")"
+                ;;
+            debian)
+                packages="$(trim_string "${debian_packages:-}")"
+                ;;
+            *)
+                die "Unsupported package family: $family"
+                ;;
+        esac
+
+        [[ -n "$packages" && "$packages" != "-" ]] || continue
+        for package in $packages; do
+            printf '%s\n' "$package"
+        done
+    done < "$PACKAGE_GROUPS_FILE" | awk '!seen[$0]++'
+}
+
+required_packages_for_profile() {
+    packages_for_profile_tier "$1" "$2" required
+}
+
+recommended_packages_for_profile() {
+    packages_for_profile_tier "$1" "$2" recommended
+}
+
+distro_required_packages_for_profile() {
+    packages_for_profile_tier "$1" "$2" required_distro
+}
+
+distro_recommended_packages_for_profile() {
+    packages_for_profile_tier "$1" "$2" recommended_distro
+}
+
+all_packages_for_profile() {
+    packages_for_profile_tier "$1" "$2" all
 }
 
 package_is_installed() {
@@ -973,6 +1349,7 @@ install_debian_docker_official() {
     local docker_os=""
     local docker_suite=""
     local arch
+    local docker_required=()
 
     # shellcheck disable=SC1091
     source /etc/os-release
@@ -1012,13 +1389,20 @@ install_debian_docker_official() {
     rm -f "$docker_sources_tmp"
 
     run_step "Updating" "apt package indexes for Docker repository" apt-get update
-    install_debian_required_packages docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    mapfile -t docker_required < <(required_packages_for_profile debian docker)
+    install_debian_required_packages "${docker_required[@]}"
 }
 
 install_debian_docker_fallback() {
-    warn "Docker's official apt repository is not supported for this release; falling back to distro Docker packages."
-    install_debian_required_packages docker.io
-    install_debian_recommended_packages docker-compose-plugin
+    local reason="${1:-Docker official apt repository is not supported for this release; falling back to distro Docker packages.}"
+    local docker_required=()
+    local docker_recommended=()
+
+    warn "$reason"
+    mapfile -t docker_required < <(distro_required_packages_for_profile debian docker)
+    mapfile -t docker_recommended < <(distro_recommended_packages_for_profile debian docker)
+    install_debian_required_packages "${docker_required[@]}"
+    install_debian_recommended_packages "${docker_recommended[@]}"
 }
 
 install_docker_profile() {
@@ -1030,8 +1414,7 @@ install_docker_profile() {
             ;;
         debian)
             if [[ "${LINUX_CLI_DOCKER_APT_SOURCE:-official}" == "distro" ]]; then
-                install_debian_required_packages docker.io
-                install_debian_recommended_packages docker-compose-plugin
+                install_debian_docker_fallback "Using distro Docker packages because LINUX_CLI_DOCKER_APT_SOURCE=distro."
             elif ! install_debian_docker_official; then
                 install_debian_docker_fallback
             fi
@@ -1200,6 +1583,36 @@ profile_is_selected() {
     return 1
 }
 
+profiles_csv_to_lines() {
+    local raw="$1"
+    local profile
+    local -a parsed_profiles
+
+    IFS=',' read -r -a parsed_profiles <<< "$raw"
+    for profile in "${parsed_profiles[@]}"; do
+        profile="$(trim_string "$profile")"
+        [[ -n "$profile" ]] || continue
+        is_supported_profile "$profile" || continue
+        printf '%s\n' "$profile"
+    done
+}
+
+package_belongs_to_profiles() {
+    local package="$1"
+    local family="$2"
+    shift 2
+    local profile
+    local profile_package
+
+    for profile in "$@"; do
+        while IFS= read -r profile_package; do
+            [[ "$package" == "$profile_package" ]] && return 0
+        done < <(all_packages_for_profile "$family" "$profile")
+    done
+
+    return 1
+}
+
 remove_file_if_managed_or_backup() {
     local installed_path="$1"
     local template_path="$2"
@@ -1223,12 +1636,12 @@ remove_file_if_managed_or_backup() {
 
 remove_profile_packages() {
     local profile="$1"
+    shift
+    local retained_profiles=("$@")
     local packages=()
+    local package
 
-    mapfile -t packages < <(
-        required_packages_for_profile "$PACKAGE_FAMILY" "$profile"
-        recommended_packages_for_profile "$PACKAGE_FAMILY" "$profile"
-    )
+    mapfile -t packages < <(all_packages_for_profile "$PACKAGE_FAMILY" "$profile")
 
     [[ "${#packages[@]}" -gt 0 ]] || return 0
 
@@ -1236,6 +1649,10 @@ remove_profile_packages() {
         debian)
             export DEBIAN_FRONTEND=noninteractive
             for package in "${packages[@]}"; do
+                if package_belongs_to_profiles "$package" "$PACKAGE_FAMILY" "${retained_profiles[@]}"; then
+                    log "Skipping retained apt package $package"
+                    continue
+                fi
                 if package_is_installed "$package"; then
                     run_step_optional "Uninstalling" "apt package $package" apt-get remove -y "$package"
                 else
@@ -1245,6 +1662,10 @@ remove_profile_packages() {
             ;;
         arch)
             for package in "${packages[@]}"; do
+                if package_belongs_to_profiles "$package" "$PACKAGE_FAMILY" "${retained_profiles[@]}"; then
+                    log "Skipping retained pacman package $package"
+                    continue
+                fi
                 if package_is_installed "$package"; then
                     run_step_optional "Uninstalling" "pacman package $package" pacman -Rns --noconfirm "$package"
                 else

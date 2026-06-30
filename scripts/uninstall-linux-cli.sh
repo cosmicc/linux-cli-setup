@@ -19,19 +19,20 @@ Usage: sudo ./uninstall.sh [options]
 Remove linux-cli-setup managed MOTD and Fish configuration.
 
 Options:
-  --remove-packages       Also remove packages for selected or saved profiles.
-  --profile NAME[,NAME]   Select package profiles to remove with --remove-packages.
+  --remove-packages       Also remove packages for selected or saved optional groups.
+  --profile NAME[,NAME]   Select optional package groups to remove with --remove-packages.
   --profiles NAME[,NAME]  Alias for --profile.
-  --all-profiles          Select every profile for package removal.
+  --all-profiles          Select every optional group for package removal.
   --keep-shell            Do not restore the user's pre-install default shell.
-  --list-profiles         Show available profiles.
+  --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.
   --version               Show version.
   --help                  Show this help.
 
 Default behavior preserves installed packages and restores the saved shell when
-state is available.
+state is available. With --remove-packages, saved optional groups are removed by
+default, but core packages are always left installed.
 HELP
 }
 
@@ -157,12 +158,39 @@ select_package_removal_profiles() {
 
 remove_selected_profile_packages() {
     local profile
+    local state_profile
+    local removal_profiles=()
+    local retained_profiles=(core)
+    local saved_profiles=()
 
     [[ "$REMOVE_PACKAGES" -eq 1 ]] || return
     select_package_removal_profiles
 
+    mapfile -t saved_profiles < <(profiles_csv_to_lines "$(state_profiles)")
+    if [[ "$PROFILES_EXPLICIT" -eq 1 ]]; then
+        for state_profile in "${saved_profiles[@]}"; do
+            [[ "$state_profile" == "core" ]] && continue
+            if ! profile_is_selected "$state_profile"; then
+                retained_profiles+=("$state_profile")
+            fi
+        done
+    fi
+
     for profile in "${SELECTED_PROFILES[@]}"; do
-        remove_profile_packages "$profile"
+        if [[ "$profile" == "core" ]]; then
+            log "Leaving core packages installed."
+            continue
+        fi
+        removal_profiles+=("$profile")
+    done
+
+    if [[ "${#removal_profiles[@]}" -eq 0 ]]; then
+        log "No optional package groups selected for removal."
+        return
+    fi
+
+    for profile in "${removal_profiles[@]}"; do
+        remove_profile_packages "$profile" "${retained_profiles[@]}"
     done
 }
 
@@ -187,6 +215,7 @@ main() {
 
     require_root
     init_logging uninstall
+    self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     init_runtime_context
     PACKAGE_STEP_VERB="Uninstalling"
     export PACKAGE_STEP_VERB

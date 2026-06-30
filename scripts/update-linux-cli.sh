@@ -16,16 +16,16 @@ Usage: sudo ./update.sh [options]
 Update system packages and refresh linux-cli-setup managed configuration.
 
 Options:
-  --profile NAME[,NAME]   Update one or more profiles in addition to core.
+  --profile NAME[,NAME]   Update one or more groups in addition to core.
   --profiles NAME[,NAME]  Alias for --profile.
-  --all-profiles          Update every profile.
-  --list-profiles         Show available profiles.
+  --all-profiles          Update every supported group.
+  --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.
   --version               Show version.
   --help                  Show this help.
 
-If no profile is given, the script uses the profiles saved by the last install.
+If no group is given, the script uses the groups saved by the last install.
 HELP
 }
 
@@ -39,7 +39,7 @@ select_state_profiles_if_needed() {
     profiles="$(state_profiles)"
     SELECTED_PROFILES=()
     add_profile_csv "$profiles"
-    add_profile core
+    ensure_core_profile_first
 }
 
 update_selected_profiles() {
@@ -80,6 +80,7 @@ main() {
 
     require_root
     init_logging update
+    self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     start_transaction
     trap transaction_error_trap ERR
     init_runtime_context
