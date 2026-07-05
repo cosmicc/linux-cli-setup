@@ -59,6 +59,7 @@ fi
 color_code() {
     case "$1" in
         blue) printf '\033[34m' ;;
+        bright_cyan) printf '\033[96m' ;;
         green) printf '\033[32m' ;;
         yellow) printf '\033[33m' ;;
         red) printf '\033[31m' ;;
@@ -168,7 +169,7 @@ run_step() {
     shift 2
 
     CURRENT_STEP_OUTPUT="$(mktemp)"
-    console_line blue "[linux-cli-setup] ${action}: ${item}"
+    console_line bright_cyan "[linux-cli-setup] ${action}: ${item}"
     debug "Command: $*"
 
     if "$@" > "$CURRENT_STEP_OUTPUT" 2>&1; then
@@ -253,10 +254,45 @@ rollback_changes() {
     ROLLBACK_RUNNING=0
 }
 
+transaction_signal_exit_code() {
+    case "$1" in
+        HUP) printf '129' ;;
+        INT) printf '130' ;;
+        QUIT) printf '131' ;;
+        TERM) printf '143' ;;
+        *) printf '1' ;;
+    esac
+}
+
+transaction_signal_trap() {
+    local signal_name="$1"
+    local exit_code
+
+    exit_code="$(transaction_signal_exit_code "$signal_name")"
+    trap - ERR HUP INT QUIT TERM
+    error "Received $signal_name; rolling back changes before exiting."
+    show_step_tail
+    rollback_changes
+    exit "$exit_code"
+}
+
+register_transaction_traps() {
+    trap transaction_error_trap ERR
+    trap 'transaction_signal_trap HUP' HUP
+    trap 'transaction_signal_trap INT' INT
+    trap 'transaction_signal_trap QUIT' QUIT
+    trap 'transaction_signal_trap TERM' TERM
+}
+
+clear_transaction_traps() {
+    trap - ERR HUP INT QUIT TERM
+}
+
 transaction_error_trap() {
     local rc=$?
 
     [[ "$rc" -eq 0 ]] && return 0
+    trap - ERR HUP INT QUIT TERM
     error "Script failed with exit code $rc."
     show_step_tail
     rollback_changes
@@ -450,7 +486,7 @@ run_visible_self_update_step() {
     shift
     local rc=0
 
-    console_line blue "[linux-cli-setup] ${action}"
+    console_line bright_cyan "[linux-cli-setup] ${action}"
     debug "Command: $*"
 
     if [[ -n "$LOG_FILE" ]]; then
@@ -1158,7 +1194,7 @@ test_package_availability_for_profiles() {
         for package in "${packages[@]}"; do
             ((profile_package_count += 1))
             ((total_package_count += 1))
-            console_line blue "[linux-cli-setup] Checking package: $profile/$package"
+            console_line bright_cyan "[linux-cli-setup] Checking package: $profile/$package"
             if package_is_available "$package"; then
                 success "Available: $profile/$package"
             else
@@ -1190,21 +1226,34 @@ record_package_install_rollback() {
     esac
 }
 
+package_display_name() {
+    local package="$1"
+
+    if [[ -n "${PACKAGE_INSTALL_PROFILE:-}" ]]; then
+        printf '%s/%s' "$PACKAGE_INSTALL_PROFILE" "$package"
+        return
+    fi
+
+    printf '%s' "$package"
+}
+
 install_debian_package() {
     local package="$1"
     local required="$2"
     local was_installed=0
+    local package_label
 
+    package_label="$(package_display_name "$package")"
     package_is_installed "$package" && was_installed=1
     export DEBIAN_FRONTEND=noninteractive
 
-    if run_step "${PACKAGE_STEP_VERB:-Installing}" "apt package $package" apt-get install -y --no-install-recommends "$package"; then
+    if run_step "${PACKAGE_STEP_VERB:-Installing}" "apt package $package_label" apt-get install -y --no-install-recommends "$package"; then
         [[ "$was_installed" -eq 0 ]] && record_package_install_rollback "$package"
         return 0
     fi
 
     [[ "$required" == "1" ]] && return 1
-    warn "Could not install optional apt package '$package'. It may not be available for this release."
+    warn "Could not install optional apt package '$package_label'. It may not be available for this release."
     return 0
 }
 
@@ -1212,23 +1261,25 @@ install_arch_package() {
     local package="$1"
     local required="$2"
     local was_installed=0
+    local package_label
 
+    package_label="$(package_display_name "$package")"
     package_is_installed "$package" && was_installed=1
 
-    if run_step "${PACKAGE_STEP_VERB:-Installing}" "pacman package $package" pacman -S --needed --noconfirm "$package"; then
+    if run_step "${PACKAGE_STEP_VERB:-Installing}" "pacman package $package_label" pacman -S --needed --noconfirm "$package"; then
         [[ "$was_installed" -eq 0 ]] && record_package_install_rollback "$package"
         return 0
     fi
 
     if [[ "$required" != "1" && -x "$(command -v yay 2>/dev/null || true)" ]]; then
-        if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "AUR package $package" run_as_target yay -S --needed --noconfirm "$package"; then
+        if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "AUR package $package_label" run_as_target yay -S --needed --noconfirm "$package"; then
             [[ "$was_installed" -eq 0 ]] && record_package_install_rollback "$package"
             return 0
         fi
     fi
 
     [[ "$required" == "1" ]] && return 1
-    warn "Could not install optional Arch package '$package'. It may not be available in pacman or AUR."
+    warn "Could not install optional Arch package '$package_label'. It may not be available in pacman or AUR."
     return 0
 }
 
@@ -1268,6 +1319,7 @@ install_arch_recommended_packages() {
 
 install_profile_packages() {
     local profile="$1"
+    local PACKAGE_INSTALL_PROFILE="$profile"
     local required_packages=()
     local recommended_packages=()
 
@@ -1338,6 +1390,8 @@ cleanup_unused_packages_and_cache() {
 }
 
 ensure_yay_on_arch() {
+    local PACKAGE_INSTALL_PROFILE="core"
+
     if [[ "$PACKAGE_FAMILY" != "arch" ]]; then
         return
     fi
@@ -1374,9 +1428,12 @@ install_jetbrains_nerd_font_from_package_or_release() {
     fi
 
     if [[ "$PACKAGE_FAMILY" == "arch" ]]; then
+        local PACKAGE_INSTALL_PROFILE="core"
+        local font_package_label
         local font_was_installed=0
+        font_package_label="$(package_display_name ttf-jetbrains-mono-nerd)"
         package_is_installed ttf-jetbrains-mono-nerd && font_was_installed=1
-        if run_step_optional "Installing" "pacman package ttf-jetbrains-mono-nerd" pacman -S --needed --noconfirm ttf-jetbrains-mono-nerd; then
+        if run_step_optional "Installing" "pacman package $font_package_label" pacman -S --needed --noconfirm ttf-jetbrains-mono-nerd; then
             [[ "$font_was_installed" -eq 0 ]] && record_package_install_rollback ttf-jetbrains-mono-nerd
             fc-cache -f >/dev/null 2>&1 || true
             return
@@ -1946,6 +2003,7 @@ enable_docker_service_and_group() {
 }
 
 install_debian_docker_official() {
+    local PACKAGE_INSTALL_PROFILE="docker"
     local docker_os=""
     local docker_suite=""
     local arch
@@ -1994,6 +2052,7 @@ install_debian_docker_official() {
 }
 
 install_debian_docker_fallback() {
+    local PACKAGE_INSTALL_PROFILE="docker"
     local reason="${1:-Docker official apt repository is not supported for this release; falling back to distro Docker packages.}"
     local docker_required=()
     local docker_recommended=()
@@ -2006,6 +2065,7 @@ install_debian_docker_fallback() {
 }
 
 install_docker_profile() {
+    local PACKAGE_INSTALL_PROFILE="docker"
     local docker_recommended=()
 
     case "$PACKAGE_FAMILY" in
@@ -2030,6 +2090,7 @@ install_docker_profile() {
 }
 
 install_dev_tools() {
+    local PACKAGE_INSTALL_PROFILE="dev"
     local tool
     local tools=(ruff black pytest pre-commit)
 
@@ -2043,12 +2104,12 @@ install_dev_tools() {
 
     if ! command -v uv >/dev/null 2>&1 && ! run_as_target bash -lc 'command -v uv >/dev/null 2>&1'; then
         log "Installing uv with pipx for $TARGET_USER"
-        run_step_optional "Installing" "pipx tool uv" run_as_target pipx install uv || run_step_optional "Updating" "pipx tool uv" run_as_target pipx upgrade uv
+        run_step_optional "Installing" "pipx tool $(package_display_name uv)" run_as_target pipx install uv || run_step_optional "Updating" "pipx tool $(package_display_name uv)" run_as_target pipx upgrade uv
     fi
 
     for tool in "${tools[@]}"; do
         log "Installing or upgrading Python tool with pipx: $tool"
-        run_step_optional "Installing" "pipx tool $tool" run_as_target pipx install "$tool" || run_step_optional "Updating" "pipx tool $tool" run_as_target pipx upgrade "$tool"
+        run_step_optional "Installing" "pipx tool $(package_display_name "$tool")" run_as_target pipx install "$tool" || run_step_optional "Updating" "pipx tool $(package_display_name "$tool")" run_as_target pipx upgrade "$tool"
     done
 }
 
@@ -2080,19 +2141,21 @@ target_has_pipx() {
 install_cargo_tool_if_missing() {
     local command_name="$1"
     local crate_name="$2"
+    local package_label
 
+    package_label="$(package_display_name "$crate_name")"
     if target_command_exists "$command_name"; then
-        debug "Comfort tool $command_name is already available"
+        debug "Comfort tool $package_label is already available"
         return 0
     fi
 
     if ! target_has_cargo; then
-        warn "cargo is unavailable; skipping fallback install for $command_name"
+        warn "cargo is unavailable; skipping fallback install for $package_label"
         return 0
     fi
 
     # shellcheck disable=SC2016
-    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "cargo tool $crate_name" \
+    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "cargo tool $package_label" \
         run_as_target bash -lc 'PATH="$HOME/.cargo/bin:$PATH"; cargo install --locked "$1"' bash "$crate_name"; then
         record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin") cargo uninstall $(shell_quote "$crate_name")"
     fi
@@ -2101,24 +2164,27 @@ install_cargo_tool_if_missing() {
 install_pipx_tool_if_missing() {
     local command_name="$1"
     local package_name="$2"
+    local package_label
 
+    package_label="$(package_display_name "$package_name")"
     if target_command_exists "$command_name"; then
-        debug "Comfort tool $command_name is already available"
+        debug "Comfort tool $package_label is already available"
         return 0
     fi
 
     if ! target_has_pipx; then
-        warn "pipx is unavailable; skipping fallback install for $command_name"
+        warn "pipx is unavailable; skipping fallback install for $package_label"
         return 0
     fi
 
     run_step_optional "Configuring" "pipx user path" run_as_target pipx ensurepath
-    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "pipx tool $package_name" run_as_target pipx install "$package_name"; then
+    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "pipx tool $package_label" run_as_target pipx install "$package_name"; then
         record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin") pipx uninstall $(shell_quote "$package_name")"
     fi
 }
 
 install_comfort_fallback_tools() {
+    local PACKAGE_INSTALL_PROFILE="comfort"
     local tool_pair
     local command_name
     local package_name
@@ -2331,6 +2397,8 @@ remove_legacy_auto_update_command() {
 }
 
 install_cron_fallback_if_needed() {
+    local PACKAGE_INSTALL_PROFILE="core"
+
     case "$PACKAGE_FAMILY" in
         debian)
             install_debian_required_packages cron
@@ -2433,9 +2501,11 @@ remove_file_if_managed_or_backup() {
 remove_profile_packages() {
     local profile="$1"
     shift
+    local PACKAGE_INSTALL_PROFILE="$profile"
     local retained_profiles=("$@")
     local packages=()
     local package
+    local package_label
 
     mapfile -t packages < <(all_packages_for_profile "$PACKAGE_FAMILY" "$profile")
 
@@ -2445,27 +2515,29 @@ remove_profile_packages() {
         debian)
             export DEBIAN_FRONTEND=noninteractive
             for package in "${packages[@]}"; do
+                package_label="$(package_display_name "$package")"
                 if package_belongs_to_profiles "$package" "$PACKAGE_FAMILY" "${retained_profiles[@]}"; then
-                    log "Skipping retained apt package $package"
+                    log "Skipping retained apt package $package_label"
                     continue
                 fi
                 if package_is_installed "$package"; then
-                    run_step_optional "Uninstalling" "apt package $package" apt-get remove -y "$package"
+                    run_step_optional "Uninstalling" "apt package $package_label" apt-get remove -y "$package"
                 else
-                    log "Skipping absent apt package $package"
+                    log "Skipping absent apt package $package_label"
                 fi
             done
             ;;
         arch)
             for package in "${packages[@]}"; do
+                package_label="$(package_display_name "$package")"
                 if package_belongs_to_profiles "$package" "$PACKAGE_FAMILY" "${retained_profiles[@]}"; then
-                    log "Skipping retained pacman package $package"
+                    log "Skipping retained pacman package $package_label"
                     continue
                 fi
                 if package_is_installed "$package"; then
-                    run_step_optional "Uninstalling" "pacman package $package" pacman -Rns --noconfirm "$package"
+                    run_step_optional "Uninstalling" "pacman package $package_label" pacman -Rns --noconfirm "$package"
                 else
-                    log "Skipping absent pacman package $package"
+                    log "Skipping absent pacman package $package_label"
                 fi
             done
             ;;

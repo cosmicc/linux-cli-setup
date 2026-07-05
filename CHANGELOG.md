@@ -16,9 +16,11 @@ All notable changes to this project will be documented in this file.
 - Added an explicit default hardening section with managed sysctl protections, OpenSSH daemon guardrails, and Debian apt repository safety settings.
 - Added `--skip-performance` and `--skip-hardening` options for hosts that need to avoid those managed changes.
 - Added a `timecheck` utility with an `ntpcheck` alias for chrony/NTP status, selected time source, and stratum details.
+- Added transaction signal handling so interrupted install, refresh, and uninstall runs roll back before exiting.
 
 ### Changed
 
+- Changed package action output to show the owning profile as `profile/package` and switched action lines away from dark blue to a brighter console color.
 - Changed time synchronization from systemd-timesyncd to chrony and disabled the previous timesyncd service during install or refresh.
 - Changed the package group source from tab-delimited `data/package-groups.tsv` to editable `data/package-groups.yaml`.
 - Changed the installed auto-update command to `/usr/local/bin/auto-update` and the runtime config to `/etc/auto-update.conf`, with cleanup for the previous managed paths.

@@ -114,7 +114,7 @@ main() {
     init_package_family
     self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     start_transaction
-    trap transaction_error_trap ERR
+    register_transaction_traps
     init_runtime_context
     select_install_profiles
     if [[ "$INSTALL_MODE" == "update" ]]; then
@@ -150,7 +150,7 @@ main() {
     cleanup_unused_packages_and_cache
     write_install_state "$(selected_profiles_csv)" "$ORIGINAL_SHELL"
     commit_transaction
-    trap - ERR
+    clear_transaction_traps
 
     if [[ "$INSTALL_MODE" == "update" ]]; then
         log "Update complete."

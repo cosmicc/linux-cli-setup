@@ -299,6 +299,8 @@ main() {
     init_logging uninstall
     init_package_family
     self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
+    start_transaction
+    register_transaction_traps
     init_runtime_context
     PACKAGE_STEP_VERB="Uninstalling"
     export PACKAGE_STEP_VERB
@@ -309,6 +311,8 @@ main() {
     restore_shell_if_needed
     remove_selected_profile_packages
     run_step_optional "Removing directory" "$STATE_DIR" rm -rf "$STATE_DIR"
+    commit_transaction
+    clear_transaction_traps
 
     log "Uninstall complete."
 }

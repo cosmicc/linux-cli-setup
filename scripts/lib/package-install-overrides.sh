@@ -18,7 +18,7 @@ run_step() {
     shift 2
 
     CURRENT_STEP_OUTPUT="$(mktemp)"
-    console_line blue "[linux-cli-setup] ${action}: ${item}"
+    console_line bright_cyan "[linux-cli-setup] ${action}: ${item}"
     debug "Command: $*"
 
     if "$@" > "$CURRENT_STEP_OUTPUT" 2>&1; then
@@ -40,26 +40,29 @@ run_step() {
 install_debian_package() {
     local package="$1"
     local required="$2"
+    local package_label
+
+    package_label="$(package_display_name "$package")"
 
     if package_is_installed "$package"; then
-        debug "apt package $package is already installed"
+        debug "apt package $package_label is already installed"
         return 0
     fi
 
     export DEBIAN_FRONTEND=noninteractive
 
     if [[ "$required" != "1" ]] && ! package_is_available "$package"; then
-        warn "Skipping unavailable optional apt package '$package'."
+        warn "Skipping unavailable optional apt package '$package_label'."
         return 0
     fi
 
-    if run_step "${PACKAGE_STEP_VERB:-Installing}" "apt package $package" apt-get install -y --no-install-recommends "$package"; then
+    if run_step "${PACKAGE_STEP_VERB:-Installing}" "apt package $package_label" apt-get install -y --no-install-recommends "$package"; then
         record_package_install_rollback "$package"
         return 0
     fi
 
     [[ "$required" == "1" ]] && return 1
-    warn "Could not install optional apt package '$package'. It may not be available for this release."
+    warn "Could not install optional apt package '$package_label'. It may not be available for this release."
     return 0
 }
 
@@ -78,34 +81,37 @@ arch_package_available_in_yay() {
 install_arch_package() {
     local package="$1"
     local required="$2"
+    local package_label
+
+    package_label="$(package_display_name "$package")"
 
     if package_is_installed "$package"; then
-        debug "pacman package $package is already installed"
+        debug "pacman package $package_label is already installed"
         return 0
     fi
 
     if [[ "$required" != "1" ]]; then
         if arch_package_available_in_pacman "$package"; then
-            if run_step "${PACKAGE_STEP_VERB:-Installing}" "pacman package $package" pacman -S --needed --noconfirm "$package"; then
+            if run_step "${PACKAGE_STEP_VERB:-Installing}" "pacman package $package_label" pacman -S --needed --noconfirm "$package"; then
                 record_package_install_rollback "$package"
                 return 0
             fi
-            warn "Could not install optional Arch package '$package' from pacman."
+            warn "Could not install optional Arch package '$package_label' from pacman."
             return 0
         fi
 
         if arch_package_available_in_yay "$package"; then
-            if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "AUR package $package" run_as_target yay -S --needed --noconfirm "$package"; then
+            if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "AUR package $package_label" run_as_target yay -S --needed --noconfirm "$package"; then
                 record_package_install_rollback "$package"
             fi
             return 0
         fi
 
-        warn "Skipping unavailable optional Arch package '$package'."
+        warn "Skipping unavailable optional Arch package '$package_label'."
         return 0
     fi
 
-    if run_step "${PACKAGE_STEP_VERB:-Installing}" "pacman package $package" pacman -S --needed --noconfirm "$package"; then
+    if run_step "${PACKAGE_STEP_VERB:-Installing}" "pacman package $package_label" pacman -S --needed --noconfirm "$package"; then
         record_package_install_rollback "$package"
         return 0
     fi
@@ -116,9 +122,11 @@ install_arch_package() {
 install_cargo_tool_if_missing() {
     local command_name="$1"
     local crate_name="$2"
+    local package_label
 
+    package_label="$(package_display_name "$crate_name")"
     if target_command_exists "$command_name"; then
-        debug "Comfort tool $command_name is already available"
+        debug "Comfort tool $package_label is already available"
         return 0
     fi
 
@@ -127,17 +135,17 @@ install_cargo_tool_if_missing() {
             warn "Skipping cargo source-build fallbacks for missing comfort tools because LINUX_CLI_ENABLE_CARGO_FALLBACKS=0."
             CARGO_FALLBACKS_NOTICE_SHOWN=1
         fi
-        debug "Skipping cargo fallback for $command_name ($crate_name)."
+        debug "Skipping cargo fallback for $package_label."
         return 0
     fi
 
     if ! target_has_cargo; then
-        warn "cargo is unavailable; skipping fallback install for $command_name"
+        warn "cargo is unavailable; skipping fallback install for $package_label"
         return 0
     fi
 
     # shellcheck disable=SC2016
-    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "cargo tool $crate_name" \
+    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "cargo tool $package_label" \
         run_as_target bash -lc 'PATH="$HOME/.cargo/bin:$PATH"; cargo install --locked "$1"' bash "$crate_name"; then
         record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin") cargo uninstall $(shell_quote "$crate_name")"
     fi

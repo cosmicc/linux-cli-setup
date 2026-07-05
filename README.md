@@ -40,10 +40,10 @@ sudo ./install.sh --all-profiles
 
 Package names are read from [data/package-groups.yaml](data/package-groups.yaml). Edit that file to change which Arch or Debian/Ubuntu packages belong to each group. The YAML file keeps package names as one-per-line lists so manual edits are easier to review than the old tab-delimited map.
 
-Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
+Package status lines show the owning profile for package actions, such as `core/curl` or `netops/nmap`. Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
 Performance tuning and hardening are enabled by default. Use `--skip-performance` or `--skip-hardening` when you need to leave those settings untouched for a specific host.
 
-Before install, saved-profile refresh, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is.
+Before install, saved-profile refresh, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is. If an install, refresh, or uninstall is interrupted with Ctrl+C or a termination signal, the active transaction rolls back before the script exits.
 
 Show the script version:
 
