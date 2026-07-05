@@ -65,7 +65,7 @@ Available profiles:
 
 ## Core Install
 
-The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt, and a dynamic MOTD.
+The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt, and a dynamic MOTD. Rerunning install or update refreshes the managed prompt.
 
 It also adds common CLI tools:
 
@@ -254,11 +254,13 @@ Uninstall also logs to `/var/log/linux-cli-setup/`. It keeps going after individ
 
 The installer sets the system timezone to `America/Detroit` and enables automatic NTP synchronization. On systemd systems, it configures `systemd-timesyncd` so DHCP-provided NTP servers remain preferred and `us.pool.ntp.org` is used as the fallback pool.
 
-Two status commands are installed:
+Status and utility commands are installed into `/usr/local/bin`:
 
 ```bash
 time-status
 ntp-status
+drivecheck
+docker-status
 ```
 
 ## Automatic Updates

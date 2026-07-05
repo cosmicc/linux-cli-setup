@@ -17,6 +17,8 @@ This project provides root-run Linux setup, update, and uninstall scripts for CL
 - `scripts/uninstall-linux-cli.sh` contains the uninstall flow.
 - `scripts/install-test-linux-cli.sh` contains the package availability diagnostic flow.
 - `scripts/lib/linux-cli-common.sh` contains shared profile, package, distro, user, Fish, Git, MOTD, Docker, and safety helpers.
+- `scripts/lib/package-install-overrides.sh` contains runtime install overrides for availability-aware package installs and installed utility commands.
+- `scripts/utilities/` contains managed utility commands copied to `/usr/local/bin`.
 - `templates/fish/` contains Fish, Fisher, Tide, abbreviation, and fallback MOTD hook templates.
 - `templates/sysctl/` contains managed sysctl hardening templates.
 - `templates/motd/linux-cli-motd` contains the dynamic MOTD script installed on target systems.
@@ -108,7 +110,7 @@ The `comfort` profile is the optional CLI workflow layer. It should prefer distr
 
 Comfort includes Fish integrations for `atuin`, `zoxide`, `direnv`, and `mise` when those commands exist. Keep Tide as the prompt because the project intentionally uses Fish + Tide to match the screenshot. Do not switch to Starship unless the user explicitly asks.
 
-Managed Fish functions live under `templates/fish/functions/` and are installed into the target user's `~/.config/fish/functions/`. Managed SSH client defaults live under `templates/ssh/`; install them through an include file under `~/.ssh/conf.d/` and do not overwrite the user's full `~/.ssh/config`.
+Managed Fish functions live under `templates/fish/functions/` and are installed into the target user's `~/.config/fish/functions/`. The managed `fish_prompt.fish` must match the reference two-line Tide prompt with OS/current directory on the left, a horizontal frame, context/time on the right, and the prompt character on the second line. Install and update must refresh that prompt after Tide settings are applied so rerunning `install.sh` restores the managed prompt. Managed SSH client defaults live under `templates/ssh/`; install them through an include file under `~/.ssh/conf.d/` and do not overwrite the user's full `~/.ssh/config`.
 
 ### Git Defaults
 
@@ -194,6 +196,7 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 - The installer should set the timezone to `America/Detroit`.
 - Enable automatic NTP synchronization. On systemd systems, prefer DHCP-provided NTP servers and use `us.pool.ntp.org` as the fallback pool through `systemd-timesyncd`.
 - Install `time-status` and `ntp-status` into `/usr/local/bin`.
+- Install regular files from `scripts/utilities/` into `/usr/local/bin` as root-owned executable utility commands. Uninstall should remove matching managed utility commands by comparing them against the repository copies and should back up changed local files instead of deleting them.
 - Install `/usr/local/sbin/linux-cli-auto-update` and `/etc/linux-cli-setup/auto-update.conf`.
 - Never commit real Pushover keys. The config template must contain placeholders only and the installed config must be root-only mode `0600`.
 - A root `.auto-update.conf` may exist for local testing with real settings, but it must stay ignored by Git. The installed runtime config is still `/etc/linux-cli-setup/auto-update.conf`.
@@ -218,9 +221,9 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 Before finishing installer changes, run the practical checks available in the current environment:
 
 ```bash
-bash -n install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/update-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
+bash -n install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/update-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
 fish -n templates/fish/config.fish templates/fish/configure_tide.fish templates/fish/conf.d/linux-cli-motd.fish templates/fish/functions/*.fish
-shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/update-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
+shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/update-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
 ./install.sh --list-profiles
 ./install.sh --help
 ./install.sh --version

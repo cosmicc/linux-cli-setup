@@ -326,12 +326,14 @@ LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/drive-test-logs-$TIMESTAMP.XXXXXX")"
 
 mkdir -p "$F3DIR" "$SPEEDDIR" || fatal "Could not create test directory: $TESTROOT"
 
+# cleanup is invoked indirectly by the EXIT trap below.
+# shellcheck disable=SC2329
 cleanup() {
     if [[ "$KEEP_FILES" -ne 1 && -d "$TESTROOT" ]]; then
         rm -rf "$TESTROOT" 2>/dev/null || true
     fi
 }
-trap cleanup EXIT
+trap 'cleanup' EXIT
 
 print_header() {
     log ""

@@ -10,7 +10,7 @@ set -Eeuo pipefail
 
 CARGO_FALLBACKS_NOTICE_SHOWN=0
 STATIC_MOTD_BACKUP="$CONFIG_DIR/motd.static.original"
-MAINTENANCE_SCRIPT_DIR="$PROJECT_ROOT/scripts/maintenance"
+UTILITY_SCRIPT_DIR="$PROJECT_ROOT/scripts/utilities"
 
 run_step() {
     local action="$1"
@@ -143,28 +143,28 @@ install_cargo_tool_if_missing() {
     fi
 }
 
-install_maintenance_scripts() {
+install_utility_scripts() {
     local script_file
     local script_name
 
-    if [[ ! -d "$MAINTENANCE_SCRIPT_DIR" ]]; then
-        debug "Maintenance script directory not found: $MAINTENANCE_SCRIPT_DIR"
+    if [[ ! -d "$UTILITY_SCRIPT_DIR" ]]; then
+        debug "Utility script directory not found: $UTILITY_SCRIPT_DIR"
         return 0
     fi
 
-    log "Installing maintenance scripts from $MAINTENANCE_SCRIPT_DIR"
+    log "Installing utility scripts from $UTILITY_SCRIPT_DIR"
     while IFS= read -r -d '' script_file; do
         script_name="$(basename "$script_file")"
         [[ -n "$script_name" ]] || continue
         [[ "${script_name:0:1}" != "." ]] || continue
         install_owned_file "$script_file" "/usr/local/bin/$script_name" 0755 root root
-    done < <(find "$MAINTENANCE_SCRIPT_DIR" -maxdepth 1 -type f -print0 | sort -z)
+    done < <(find "$UTILITY_SCRIPT_DIR" -maxdepth 1 -type f -print0 | sort -z)
 }
 
 install_status_commands() {
     install_owned_file "$BIN_TEMPLATE_DIR/time-status" /usr/local/bin/time-status 0755 root root
     install_owned_file "$BIN_TEMPLATE_DIR/ntp-status" /usr/local/bin/ntp-status 0755 root root
-    install_maintenance_scripts
+    install_utility_scripts
 }
 
 install_custom_fish_prompt() {

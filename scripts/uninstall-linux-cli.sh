@@ -118,6 +118,20 @@ reenable_motd_snippets() {
     run_step_optional "Removing directory" "/etc/update-motd.d/.linux-cli-setup-disabled" rm -rf /etc/update-motd.d/.linux-cli-setup-disabled
 }
 
+remove_installed_utility_scripts() {
+    local script_file
+    local script_name
+
+    [[ -d "$UTILITY_SCRIPT_DIR" ]] || return
+
+    while IFS= read -r -d '' script_file; do
+        script_name="$(basename "$script_file")"
+        [[ -n "$script_name" ]] || continue
+        [[ "${script_name:0:1}" != "." ]] || continue
+        remove_file_if_managed_or_backup "/usr/local/bin/$script_name" "$script_file"
+    done < <(find "$UTILITY_SCRIPT_DIR" -maxdepth 1 -type f -print0 | sort -z)
+}
+
 remove_managed_files() {
     local fish_config_dir="$TARGET_HOME/.config/fish"
     local function_template
@@ -151,6 +165,7 @@ remove_managed_files() {
     run_step_optional "Removing file" "/usr/local/bin/linux-cli-motd" rm -f /usr/local/bin/linux-cli-motd
     run_step_optional "Removing file" "/usr/local/bin/time-status" rm -f /usr/local/bin/time-status
     run_step_optional "Removing file" "/usr/local/bin/ntp-status" rm -f /usr/local/bin/ntp-status
+    remove_installed_utility_scripts
     run_step_optional "Removing file" "/usr/local/sbin/linux-cli-auto-update" rm -f /usr/local/sbin/linux-cli-auto-update
     run_step_optional "Removing file" "/etc/update-motd.d/50-linux-cli-setup" rm -f /etc/update-motd.d/50-linux-cli-setup
     run_step_optional "Removing file" "/etc/fish/conf.d/linux-cli-motd.fish" rm -f /etc/fish/conf.d/linux-cli-motd.fish

@@ -13,10 +13,12 @@ All notable changes to this project will be documented in this file.
 - Added the optional `wireless` profile for NetworkManager, Wi-Fi tooling, firmware packages, RF-kill controls, mobile broadband support, and wireless Fish helpers.
 - Added `install_test.sh` to check package availability across selected profiles without installing anything.
 - Added a managed basic sysctl hardening template.
+- Added installation and managed uninstall cleanup for utility commands from `scripts/utilities/`.
 
 ### Changed
 
 - Changed Fish plugin setup to use `zoxide` for directory jumping and added `edc/bass` to the managed Fisher plugin list.
+- Changed the managed Fish prompt template to match the reference two-line Tide prompt and documented that install/update refresh it after Tide configuration.
 - Changed install and update to apply best-effort basic hardening, configure UFW, and clean unused packages plus package caches near the end of each run.
 
 ## 0.2a - 2026-06-30
