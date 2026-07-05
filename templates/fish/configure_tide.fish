@@ -85,7 +85,7 @@ set -U tide_git_color_staged D7AF00
 set -U tide_git_color_stash 5F8787
 set -U tide_git_color_untracked 00AFFF
 set -U tide_git_color_upstream 5FD700
-set -U tide_git_icon git
+set -U tide_git_icon ''
 set -U tide_git_truncation_length 24
 set -U tide_git_truncation_strategy ''
 
