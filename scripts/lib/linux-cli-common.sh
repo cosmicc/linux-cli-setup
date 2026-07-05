@@ -25,7 +25,7 @@ TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 EXPECTED_GITHUB_REPO="${LINUX_CLI_SELF_UPDATE_REPO:-cosmicc/linux-cli-setup}"
 SELF_UPDATE_BRANCH="${LINUX_CLI_SELF_UPDATE_BRANCH:-main}"
 
-SUPPORTED_PROFILES=(core comfort dev netops wireless diagnostics docker desktop)
+SUPPORTED_PROFILES=(core comfort dev netops wireless storage diagnostics docker desktop)
 COMFORT_FISH_FUNCTIONS=(mkcd extract dnscheck certcheck serve jfu scs)
 WIRELESS_FISH_FUNCTIONS=(wifi-connect wifi-info)
 SELECTED_PROFILES=()
@@ -654,6 +654,9 @@ profile_description() {
             ;;
         wireless)
             printf 'NetworkManager, Wi-Fi scanning, firmware, RF-kill, mobile broadband, and wireless CLI helpers'
+            ;;
+        storage)
+            printf 'filesystem, removable media, SMB/CIFS, encryption, recovery, and flash-media tools'
             ;;
         diagnostics)
             printf 'hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics'

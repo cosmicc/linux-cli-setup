@@ -1,6 +1,6 @@
 # Linux CLI Setup
 
-Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. A fresh install defaults to a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, Docker hosting, and desktop helpers are optional package groups.
+Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. A fresh install defaults to a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, Docker hosting, and desktop helpers are optional package groups.
 
 Current unreleased alpha testing version: `0.3a`.
 
@@ -31,6 +31,7 @@ TARGET_USER=myuser ./install.sh
 sudo ./install.sh --profile dev,netops
 sudo ./install.sh --profile comfort
 sudo ./install.sh --profile wireless
+sudo ./install.sh --profile storage
 sudo ./install.sh --profile docker
 sudo ./install.sh --all-profiles
 ```
@@ -59,6 +60,7 @@ Available profiles:
 | `dev` | Python, C/C++ build tools, Neovim, uv, pipx tools, and developer Git helpers. |
 | `netops` | DNS, packet capture, port scanning, VPN, SSH, transfer, and MSP troubleshooting tools. |
 | `wireless` | NetworkManager, Wi-Fi scanning, firmware, RF-kill, mobile broadband, and wireless CLI helpers. |
+| `storage` | Filesystem, removable media, SMB/CIFS, encryption, recovery, and flash-media tools. |
 | `diagnostics` | Hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics. Explicit-only for compatibility. |
 | `docker` | Docker host packages, Compose plugin, Docker CLI helpers, and Fish Docker aliases. |
 | `desktop` | GUI workstation clipboard, desktop integration, and notification helpers. |
@@ -85,9 +87,12 @@ It also adds common CLI tools:
 | Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tldr` |
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | `chezmoi` |
+| Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
+| Transfer / throughput | `rsync`, `pv` | `rsync`, `pv` |
+| System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `dstat`, `vnstat`, `bmon` |
 | Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
 
-Some recommended packages are installed best-effort because older distro releases may not ship every package.
+Some recommended packages are installed best-effort because older distro releases may not ship every package. On Arch, `aide` is installed through the AUR fallback; on Debian/Ubuntu, `dstat` is used for the requested `dool` role because `dool` is not packaged there.
 
 The installer configures UFW with a default deny incoming policy, default allow outgoing policy, and explicit inbound allowances for SSH, iperf3 on port `5201` TCP/UDP, and ICMP echo-request ping. It does not reset pre-existing UFW rules.
 
@@ -131,7 +136,7 @@ The installer also creates a managed SSH include file at `~/.ssh/conf.d/00-defau
 
 ### Netops
 
-Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, bandwidth testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, SNMP, VPN tools, `mosh`, `sshfs`, `rsync`, `rclone`, `fail2ban`, and `rkhunter`.
+Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, TLS/SSL testing, bandwidth and latency testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, SNMP, VPN tools, `mosh`, `sshfs`, `rsync`, `rclone`, `fail2ban`, and `rkhunter`.
 
 | Purpose | Arch | Debian / Ubuntu |
 | --- | --- | --- |
@@ -140,16 +145,36 @@ Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, b
 | Trace / latency | `traceroute`, `mtr` | `traceroute`, `mtr-tiny` |
 | Packet capture | `tcpdump`, `wireshark-cli` | `tcpdump`, `tshark` |
 | Port scanning | `nmap` | `nmap` |
-| Bandwidth testing | `iperf3` | `iperf3` |
+| TLS / SSL testing | `sslscan`, `testssl.sh` | `sslscan`, `testssl.sh` |
+| Bandwidth / latency testing | `iperf3`, `fping` | `iperf3`, `fping` |
 | Interface tools | `ethtool` | `ethtool` |
 | Open ports/processes | `lsof` | `lsof` |
 | WHOIS | `whois` | `whois` |
-| Netcat / sockets | `openbsd-netcat`, `socat` | `netcat-openbsd`, `socat` |
+| Netcat / sockets | `openbsd-netcat`, `nmap` for `ncat`, `socat` | `netcat-openbsd`, `ncat`, `socat` |
 | ARP discovery | `arp-scan` | `arp-scan` |
 | SMB testing | `smbclient` | `smbclient` |
 | SNMP | `net-snmp` | `snmp`, `snmp-mibs-downloader` |
 | VPN tools | `wireguard-tools`, `openvpn` | `wireguard-tools`, `openvpn` |
 | Rootkit scanner | `rkhunter` | `rkhunter` |
+
+### Storage
+
+Installs filesystem administration, removable-media, SMB/CIFS, encryption, copy progress, recovery, and flash-media verification tools.
+
+| Purpose | Arch | Debian / Ubuntu |
+| --- | --- | --- |
+| XFS tools | `xfsprogs` | `xfsprogs` |
+| Btrfs tools | `btrfs-progs` | `btrfs-progs` |
+| FAT tools | `dosfstools` | `dosfstools` |
+| exFAT tools | `exfatprogs` | `exfatprogs` |
+| NTFS tools | `ntfs-3g` | `ntfs-3g` |
+| SMB/CIFS mounts | `cifs-utils` | `cifs-utils` |
+| Disk encryption | `cryptsetup` | `cryptsetup` |
+| Copy progress | `pv` | `pv` |
+| GNU ddrescue | `ddrescue` | `gddrescue` |
+| Flash-media validation | `f3` | `f3` |
+
+On Arch, `f3` is installed through the AUR fallback.
 
 ### Wireless
 

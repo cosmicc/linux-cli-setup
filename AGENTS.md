@@ -4,7 +4,7 @@ This is the first-read guide for agents working in `linux-cli-setup`. Read this 
 
 ## Project Purpose
 
-This project provides root-run Linux setup, refresh, and uninstall scripts for CLI-focused systems. It supports Arch-based systems with `pacman`/`yay` and Debian/Ubuntu-based systems with `apt`. The default fresh install is the `core` profile; optional profiles add CLI comfort tools, development, network troubleshooting, wireless support, diagnostics, Docker host, and desktop workstation tooling.
+This project provides root-run Linux setup, refresh, and uninstall scripts for CLI-focused systems. It supports Arch-based systems with `pacman`/`yay` and Debian/Ubuntu-based systems with `apt`. The default fresh install is the `core` profile; optional profiles add CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, diagnostics, Docker host, and desktop workstation tooling.
 
 ## Repository Map
 
@@ -38,6 +38,7 @@ Do not collapse this project into one giant "install everything" profile. Keep `
 | `dev` | Python, C/C++ build tools, Neovim, uv, pipx tools, and developer Git helpers. |
 | `netops` | DNS, packet capture, port scanning, VPN, SSH, transfer, and MSP troubleshooting tools. |
 | `wireless` | NetworkManager, Wi-Fi scanning, firmware, RF-kill, mobile broadband, and wireless CLI helpers. |
+| `storage` | Filesystem, removable media, SMB/CIFS, encryption, recovery, and flash-media tools. |
 | `diagnostics` | Hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics. |
 | `docker` | Docker host packages, Compose plugin, Docker CLI helpers, and Fish Docker aliases. |
 | `desktop` | GUI workstation clipboard, desktop integration, and notification helpers. |
@@ -98,11 +99,16 @@ Core always includes OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, 
 | Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tldr` |
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | `chezmoi` |
+| Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
+| Transfer / throughput | `rsync`, `pv` | `rsync`, `pv` |
+| System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `dstat`, `vnstat`, `bmon` |
 | Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
 
 Arch-specific core additions are `pacman-contrib`, `reflector`, `pkgfile`, and `base-devel`. Enable `paccache.timer` and run `pkgfile -u` when available.
 
 Debian/Ubuntu-specific additions are `apt-file`, `needrestart`, `debian-goodies`, `software-properties-common`, `apt-transport-https`, `unattended-upgrades`, and `nala`.
+
+Arch does not ship `aide` in the official repositories; keep it recommended so the existing `yay` fallback can install the AUR `aide` package without making core a hard failure. Debian/Ubuntu does not ship `dool` in the stable package set, so the apt-side package is `dstat`.
 
 ### Comfort
 
@@ -136,11 +142,12 @@ If `delta` exists, configure `core.pager`, `interactive.diffFilter`, `delta.navi
 | Trace / latency | `traceroute`, `mtr` | `traceroute`, `mtr-tiny` |
 | Packet capture | `tcpdump`, `wireshark-cli` | `tcpdump`, `tshark` |
 | Port scanning | `nmap` | `nmap` |
-| Bandwidth testing | `iperf3` | `iperf3` |
+| TLS / SSL testing | `sslscan`, `testssl.sh` | `sslscan`, `testssl.sh` |
+| Bandwidth / latency testing | `iperf3`, `fping` | `iperf3`, `fping` |
 | Interface tools | `ethtool` | `ethtool` |
 | Open ports/processes | `lsof` | `lsof` |
 | WHOIS | `whois` | `whois` |
-| Netcat / sockets | `openbsd-netcat`, `socat` | `netcat-openbsd`, `socat` |
+| Netcat / sockets | `openbsd-netcat`, `nmap` for `ncat`, `socat` | `netcat-openbsd`, `ncat`, `socat` |
 | ARP discovery | `arp-scan` | `arp-scan` |
 | SMB testing | `smbclient` | `smbclient` |
 | SNMP | `net-snmp` | `snmp`, `snmp-mibs-downloader` |
@@ -155,6 +162,25 @@ The `wireless` profile should install NetworkManager CLI support, WPA backends, 
 Do not automatically enable `iwd.service`. NetworkManager may be enabled for the `wireless` profile only when it is already active/enabled, when no obvious existing networking stack is detected, or when `LINUX_CLI_ENABLE_NETWORKMANAGER=1` is set. `LINUX_CLI_ENABLE_NETWORKMANAGER=0` must skip NetworkManager service enablement.
 
 Wireless Fish helpers are managed separately from the `comfort` helpers. Keep `wifi-connect.fish` and `wifi-info.fish` tied to the `wireless` profile.
+
+### Storage
+
+The `storage` profile should install filesystem administration, removable-media, SMB/CIFS, encryption, copy progress, recovery, and flash-media verification tools.
+
+| Purpose | Arch | Debian / Ubuntu |
+| --- | --- | --- |
+| XFS tools | `xfsprogs` | `xfsprogs` |
+| Btrfs tools | `btrfs-progs` | `btrfs-progs` |
+| FAT tools | `dosfstools` | `dosfstools` |
+| exFAT tools | `exfatprogs` | `exfatprogs` |
+| NTFS tools | `ntfs-3g` | `ntfs-3g` |
+| SMB/CIFS mounts | `cifs-utils` | `cifs-utils` |
+| Disk encryption | `cryptsetup` | `cryptsetup` |
+| Copy progress | `pv` | `pv` |
+| GNU ddrescue | `ddrescue` | `gddrescue` |
+| Flash-media validation | `f3` | `f3` |
+
+Arch does not ship `f3` in the official repositories; keep it recommended so the existing `yay` fallback can install the AUR `f3` package.
 
 ### Diagnostics
 

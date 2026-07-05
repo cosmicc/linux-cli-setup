@@ -14,6 +14,9 @@ All notable changes to this project will be documented in this file.
 - Added `install_test.sh` to check package availability across selected profiles without installing anything.
 - Added a managed basic sysctl hardening template.
 - Added installation and managed uninstall cleanup for utility commands from `scripts/utilities/`.
+- Added `lynis`, `aide`, `rsync`, `pv`, `glances`, `atop`, `dool`/`dstat`, `vnstat`, and `bmon` to the `core` package set.
+- Added the optional `storage` profile for filesystem, removable-media, SMB/CIFS, encryption, recovery, and flash-media validation tools.
+- Added `sslscan`, `testssl.sh`, `fping`, and Debian/Ubuntu `ncat` coverage to the `netops` package set.
 
 ### Changed
 
