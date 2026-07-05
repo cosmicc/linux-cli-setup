@@ -38,7 +38,7 @@ Do not collapse this project into one giant "install everything" profile. Keep `
 | `core` | Always-installed CLI baseline, Fish prompt, Git defaults, MOTD, and distro helpers. |
 | `comfort` | CLI workflow helpers, safer shell shortcuts, Fish functions, and SSH client defaults. |
 | `dev` | Python, C/C++ build tools, Neovim, uv, pipx tools, and developer Git helpers. |
-| `netops` | DNS, packet capture, port scanning, VPN, SSH, transfer, and MSP troubleshooting tools. |
+| `netops` | DNS, packet capture, port scanning, SSH, transfer, and MSP troubleshooting tools. |
 | `wireless` | NetworkManager, Wi-Fi scanning, firmware, RF-kill, mobile broadband, and wireless CLI helpers. |
 | `storage` | Filesystem, removable media, SMB/CIFS, encryption, recovery, and flash-media tools. |
 | `diagnostics` | Hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics. |
@@ -156,10 +156,8 @@ If `delta` exists, configure `core.pager`, `interactive.diffFilter`, `delta.navi
 | Netcat / sockets | `openbsd-netcat`, `nmap` for `ncat`, `socat` | `netcat-openbsd`, `ncat`, `socat` |
 | ARP discovery | `arp-scan` | `arp-scan` |
 | SMB testing | `smbclient` | `smbclient` |
-| SNMP | `net-snmp` | `snmp`, `snmp-mibs-downloader` |
-| VPN tools | `wireguard-tools`, `openvpn` | `wireguard-tools`, `openvpn` |
 
-Also include `mosh`, `sshfs`, `rsync`, `rclone`, and `rkhunter`. Keep fail2ban in core because SSH protection should be enabled on the baseline install.
+Also include `mosh`, `sshfs`, `rclone`, and `rkhunter`. Keep `rsync` and fail2ban in core because transfer support and SSH protection should be enabled on the baseline install.
 
 ### Wireless
 

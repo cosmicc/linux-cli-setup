@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Changed the package group source from tab-delimited `data/package-groups.tsv` to editable `data/package-groups.yaml`.
 - Changed the installed auto-update command to `/usr/local/bin/auto-update` and the runtime config to `/etc/auto-update.conf`, with cleanup for the previous managed paths.
 - Changed the Docker status utility name from `docker-status` to `dockercheck`.
+- Removed OpenVPN, WireGuard, SNMP tooling, and duplicate `rsync` entries from the netops profile; `rsync` remains in core.
 - Moved fail2ban ownership from the netops profile into core.
 - Changed the Arch archive package mapping from retired `p7zip` to current `7zip`.
 - Changed package mappings so Arch rows use pacman packages and Debian rows use Debian stable package names, except Docker's official apt repository package path.

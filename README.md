@@ -61,7 +61,7 @@ Available profiles:
 | `core` | Always-installed CLI baseline, Fish prompt, Git defaults, MOTD, and distro helpers. |
 | `comfort` | CLI workflow helpers, safer shell shortcuts, Fish functions, and SSH client defaults. |
 | `dev` | Python, C/C++ build tools, Neovim, uv, pipx tools, and developer Git helpers. |
-| `netops` | DNS, packet capture, port scanning, VPN, SSH, transfer, and MSP troubleshooting tools. |
+| `netops` | DNS, packet capture, port scanning, SSH, transfer, and MSP troubleshooting tools. |
 | `wireless` | NetworkManager, Wi-Fi scanning, firmware, RF-kill, mobile broadband, and wireless CLI helpers. |
 | `storage` | Filesystem, removable media, SMB/CIFS, encryption, recovery, and flash-media tools. |
 | `diagnostics` | Hardware, disk, sensor, I/O, network usage, tracing, and process diagnostics. Explicit-only for compatibility. |
@@ -140,7 +140,7 @@ The installer also creates a managed SSH include file at `~/.ssh/conf.d/00-defau
 
 ### Netops
 
-Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, TLS/SSL testing, bandwidth and latency testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, SNMP, VPN tools, `mosh`, `sshfs`, `rsync`, `rclone`, and `rkhunter`. SSH brute-force protection is configured by the core fail2ban install.
+Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, TLS/SSL testing, bandwidth and latency testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, `mosh`, `sshfs`, `rclone`, and `rkhunter`. `rsync` is part of core, and SSH brute-force protection is configured by the core fail2ban install.
 
 | Purpose | Arch | Debian / Ubuntu |
 | --- | --- | --- |
@@ -157,8 +157,6 @@ Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, T
 | Netcat / sockets | `openbsd-netcat`, `nmap` for `ncat`, `socat` | `netcat-openbsd`, `ncat`, `socat` |
 | ARP discovery | `arp-scan` | `arp-scan` |
 | SMB testing | `smbclient` | `smbclient` |
-| SNMP | `net-snmp` | `snmp`, `snmp-mibs-downloader` |
-| VPN tools | `wireguard-tools`, `openvpn` | `wireguard-tools`, `openvpn` |
 | Rootkit scanner | `rkhunter` | `rkhunter` |
 
 ### Storage
