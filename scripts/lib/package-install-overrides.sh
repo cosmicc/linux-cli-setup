@@ -2,12 +2,14 @@
 #
 # Runtime fixes and availability-aware install overrides.
 #
-# This file is sourced after linux-cli-common.sh by install/update entrypoints so
-# functions defined here intentionally replace selected common-library defaults.
+# This file is sourced after linux-cli-common.sh by install/update/uninstall
+# entrypoints so functions defined here intentionally replace selected
+# common-library defaults.
 
 set -Eeuo pipefail
 
 CARGO_FALLBACKS_NOTICE_SHOWN=0
+STATIC_MOTD_BACKUP="$CONFIG_DIR/motd.static.original"
 
 run_step() {
     local action="$1"
@@ -138,4 +140,164 @@ install_cargo_tool_if_missing() {
         run_as_target bash -lc 'PATH="$HOME/.cargo/bin:$PATH"; cargo install --locked "$1"' bash "$crate_name"; then
         record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin") cargo uninstall $(shell_quote "$crate_name")"
     fi
+}
+
+install_custom_fish_prompt() {
+    local fish_config_dir="$TARGET_HOME/.config/fish"
+    local prompt_template="$FISH_TEMPLATE_DIR/functions/fish_prompt.fish"
+
+    if [[ ! -f "$prompt_template" ]]; then
+        warn "Fish prompt template not found: $prompt_template"
+        return 0
+    fi
+
+    install_owned_file "$prompt_template" "$fish_config_dir/functions/fish_prompt.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
+}
+
+configure_fish_files() {
+    local config_root="$TARGET_HOME/.config"
+    local fish_config_dir="$config_root/fish"
+
+    log "Installing Fish configuration for $TARGET_USER"
+    run_step "Creating directory" "$config_root" install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0755 -d \
+        "$config_root" \
+        "$fish_config_dir" \
+        "$fish_config_dir/conf.d" \
+        "$fish_config_dir/functions"
+
+    run_step_optional "Creating directory" "$config_root/atuin" install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0700 -d "$config_root/atuin" || true
+    run_step_optional "Setting ownership" "$config_root/atuin" chown -R "$TARGET_USER:$TARGET_GROUP" "$config_root/atuin" || true
+
+    install_owned_file "$FISH_TEMPLATE_DIR/config.fish" "$fish_config_dir/config.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
+    install_owned_file "$FISH_TEMPLATE_DIR/fish_plugins" "$fish_config_dir/fish_plugins" 0644 "$TARGET_USER" "$TARGET_GROUP"
+    install_custom_fish_prompt
+
+    if profile_is_selected comfort; then
+        install_fish_function_templates "${COMFORT_FISH_FUNCTIONS[@]}"
+    fi
+
+    if profile_is_selected wireless; then
+        install_fish_function_templates "${WIRELESS_FISH_FUNCTIONS[@]}"
+    fi
+}
+
+install_fisher_plugins() {
+    local plugin_list
+    plugin_list="$(grep -Ev '^[[:space:]]*(#|$)' "$FISH_TEMPLATE_DIR/fish_plugins" | tr '\n' ' ')"
+
+    log "Installing or updating Fisher and Fish plugins for $TARGET_USER"
+    run_step "Installing" "Fisher and Fish plugins" run_as_target fish -lc "curl -fsSL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher install jorgebucaran/fisher; and fisher install $plugin_list"
+
+    log "Applying Tide prompt settings"
+    run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
+    install_custom_fish_prompt
+}
+
+update_fisher_plugins() {
+    local plugin_list
+
+    if ! command -v fish >/dev/null 2>&1; then
+        warn "Fish is not installed; skipping Fisher plugin update"
+        return
+    fi
+
+    log "Updating Fisher plugins for $TARGET_USER"
+    plugin_list="$(grep -Ev '^[[:space:]]*(#|$)' "$FISH_TEMPLATE_DIR/fish_plugins" | tr '\n' ' ')"
+    run_step "Updating" "Fisher plugins" run_as_target fish -lc "if functions -q fisher; fisher install $plugin_list; and fisher update; else exit 0; end"
+    run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
+    install_custom_fish_prompt
+}
+
+suppress_static_motd() {
+    local motd_path="/etc/motd"
+    local tmp_file
+    local backup
+
+    [[ "${LINUX_CLI_KEEP_DEFAULT_MOTD:-0}" != "1" ]] || return 0
+    [[ -e "$motd_path" ]] || return 0
+
+    if [[ -L "$motd_path" ]]; then
+        warn "Skipping static MOTD suppression because $motd_path is a symlink."
+        return 0
+    fi
+
+    [[ -f "$motd_path" ]] || return 0
+    if ! grep -Fq 'The programs included with the Debian GNU/Linux system are free software;' "$motd_path" && \
+        ! grep -Fq 'Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY' "$motd_path"; then
+        return 0
+    fi
+
+    run_step "Creating directory" "$CONFIG_DIR" install -m 0700 -d "$CONFIG_DIR"
+    if [[ ! -f "$STATIC_MOTD_BACKUP" ]]; then
+        run_step "Backing up" "$motd_path to $STATIC_MOTD_BACKUP" cp -p "$motd_path" "$STATIC_MOTD_BACKUP"
+        chmod 0600 "$STATIC_MOTD_BACKUP"
+    fi
+
+    tmp_file="$(mktemp)"
+    awk '
+        /^The programs included with the Debian GNU\/Linux system are free software;/ {
+            skip = 1
+            next
+        }
+        skip && /^permitted by applicable law\.$/ {
+            skip = 0
+            next
+        }
+        skip {
+            next
+        }
+        {
+            print
+        }
+    ' "$motd_path" > "$tmp_file"
+
+    if cmp -s "$motd_path" "$tmp_file"; then
+        rm -f "$tmp_file"
+        return 0
+    fi
+
+    backup="${motd_path}.linux-cli-setup.${TIMESTAMP}.bak"
+    run_step "Backing up" "$motd_path" cp -p "$motd_path" "$backup"
+    record_rollback_cmd "mv -f $(shell_quote "$backup") $(shell_quote "$motd_path")"
+    run_step "Updating" "$motd_path" install -m 0644 "$tmp_file" "$motd_path"
+    rm -f "$tmp_file"
+}
+
+restore_static_motd_if_managed() {
+    [[ -f "$STATIC_MOTD_BACKUP" ]] || return 0
+
+    log "Restoring static MOTD from $STATIC_MOTD_BACKUP"
+    run_step_optional "Restoring file" "/etc/motd" install -m 0644 "$STATIC_MOTD_BACKUP" /etc/motd || true
+    run_step_optional "Removing file" "$STATIC_MOTD_BACKUP" rm -f "$STATIC_MOTD_BACKUP" || true
+}
+
+install_motd() {
+    log "Installing dynamic MOTD script"
+    install_owned_file "$MOTD_TEMPLATE" /usr/local/bin/linux-cli-motd 0755 root root
+
+    if [[ -d /etc/update-motd.d ]]; then
+        local state_dir="/etc/update-motd.d/.linux-cli-setup-disabled"
+        run_step "Creating directory" "$state_dir" mkdir -p "$state_dir"
+
+        log "Installing /etc/update-motd.d/50-linux-cli-setup"
+        install_owned_file "$MOTD_TEMPLATE" /etc/update-motd.d/50-linux-cli-setup 0755 root root
+
+        if [[ "${LINUX_CLI_KEEP_DEFAULT_MOTD:-0}" != "1" ]]; then
+            log "Disabling other executable update-motd snippets; set LINUX_CLI_KEEP_DEFAULT_MOTD=1 to keep them enabled"
+            while IFS= read -r -d '' motd_file; do
+                [[ "$(basename "$motd_file")" == "50-linux-cli-setup" ]] && continue
+                run_step "Disabling MOTD snippet" "$motd_file" chmod a-x "$motd_file"
+                record_rollback_cmd "chmod a+x $(shell_quote "$motd_file")"
+                printf '%s\n' "$motd_file" >> "$state_dir/disabled-${TIMESTAMP}.txt"
+            done < <(find /etc/update-motd.d -maxdepth 1 -type f -perm /111 -print0)
+        fi
+
+        suppress_static_motd
+        return
+    fi
+
+    log "No /etc/update-motd.d directory found; installing Fish login MOTD hook"
+    run_step "Creating directory" "/etc/fish/conf.d" install -m 0755 -d /etc/fish/conf.d
+    install_owned_file "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish" /etc/fish/conf.d/linux-cli-motd.fish 0644 root root
+    suppress_static_motd
 }

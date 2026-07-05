@@ -8,6 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/linux-cli-common.sh
 source "$SCRIPT_DIR/lib/linux-cli-common.sh"
+# shellcheck source=scripts/lib/package-install-overrides.sh
+source "$SCRIPT_DIR/lib/package-install-overrides.sh"
 
 REMOVE_PACKAGES=0
 RESTORE_SHELL=1
@@ -242,6 +244,7 @@ main() {
 
     log "Target user: $TARGET_USER"
     remove_managed_files
+    restore_static_motd_if_managed
     restore_shell_if_needed
     remove_selected_profile_packages
     run_step_optional "Removing directory" "$STATE_DIR" rm -rf "$STATE_DIR"
