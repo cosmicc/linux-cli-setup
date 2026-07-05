@@ -38,6 +38,23 @@ if status is-interactive
         mise activate fish | source
     end
 
+    abbr --query ..; or abbr --add .. 'cd ..'
+    abbr --query ...; or abbr --add ... 'cd ../..'
+    abbr --query c; or abbr --add c clear
+    abbr --query chx; or abbr --add chx 'chmod +x'
+    abbr --query sc; or abbr --add sc 'sudo systemctl'
+    abbr --query scr; or abbr --add scr 'sudo systemctl restart'
+    abbr --query jfu; or abbr --add jfu 'journalctl -fu'
+    abbr --query ipa; or abbr --add ipa 'ip -br addr'
+    abbr --query ipr; or abbr --add ipr 'ip route'
+    abbr --query dns; or abbr --add dns 'dig +short'
+    abbr --query listening; or abbr --add listening 'sudo ss -lntup'
+    abbr --query myip; or abbr --add myip 'curl -4 ifconfig.me; echo'
+    abbr --query dcuu; or abbr --add dcuu 'docker compose pull; and docker compose up -d'
+    abbr --query dst; or abbr --add dst 'docker stats'
+    abbr --query gsw; or abbr --add gsw 'git switch'
+    abbr --query gsc; or abbr --add gsc 'git switch -c'
+
     if command -q eza
         abbr --query ll; or abbr --add ll 'eza -lah --group-directories-first --icons=auto'
         abbr --query la; or abbr --add la 'eza -a --group-directories-first --icons=auto'

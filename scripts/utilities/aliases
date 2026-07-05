@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+#
+# Print the Fish abbreviations and aliases visible to the current user.
+
+set -euo pipefail
+
+VERSION="0.3a"
+
+show_help() {
+    cat <<'HELP'
+Usage: aliases [options]
+
+Print all Fish abbreviations and aliases visible to the current user.
+
+Options:
+  --version  Show version.
+  --help     Show this help.
+
+The command starts Fish in interactive mode so abbreviations from the managed
+Fish config are loaded, then filters startup banners before printing results.
+HELP
+}
+
+case "${1:-}" in
+    --help)
+        show_help
+        exit 0
+        ;;
+    --version)
+        printf 'linux-cli-setup aliases %s\n' "$VERSION"
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        printf 'Unknown option: %s\n' "$1" >&2
+        printf 'Run aliases --help for usage.\n' >&2
+        exit 2
+        ;;
+esac
+
+if [[ "$#" -gt 1 ]]; then
+    printf 'Unexpected extra arguments.\n' >&2
+    printf 'Run aliases --help for usage.\n' >&2
+    exit 2
+fi
+
+if ! command -v fish >/dev/null 2>&1; then
+    printf 'Fish is not installed or is not in PATH.\n' >&2
+    exit 1
+fi
+
+marker="__LINUX_CLI_ALIASES_BEGIN_$$_"
+
+fish -i -c "
+printf '%s\n' '$marker'
+printf '%s\n' '# Fish abbreviations'
+abbr --show
+printf '\n%s\n' '# Fish aliases'
+alias
+" 2>&1 | awk -v marker="$marker" '
+    $0 == marker {
+        started = 1
+        next
+    }
+    started {
+        print
+    }
+'

@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Added `lynis`, `aide`, `rsync`, `pv`, `glances`, `atop`, `dool`/`dstat`, `vnstat`, and `bmon` to the `core` package set.
 - Added the optional `storage` profile for filesystem, removable-media, SMB/CIFS, encryption, recovery, and flash-media validation tools.
 - Added `sslscan`, `testssl.sh`, `fping`, and Debian/Ubuntu `ncat` coverage to the `netops` package set.
+- Added managed Fish abbreviations for common navigation, systemd, journal, IP/DNS, Docker, and Git commands plus an `aliases` utility that prints Fish abbreviations and aliases.
 
 ### Changed
 

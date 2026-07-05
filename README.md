@@ -288,9 +288,12 @@ Status and utility commands are installed into `/usr/local/bin`:
 ```bash
 time-status
 ntp-status
+aliases
 drivecheck
 docker-status
 ```
+
+The `aliases` command prints the Fish abbreviations and aliases visible to the current user.
 
 ## Automatic Updates
 

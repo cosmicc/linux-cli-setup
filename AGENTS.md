@@ -17,7 +17,7 @@ This project provides root-run Linux setup, refresh, and uninstall scripts for C
 - `scripts/install-test-linux-cli.sh` contains the package availability diagnostic flow.
 - `scripts/lib/linux-cli-common.sh` contains shared profile, package, distro, user, Fish, Git, MOTD, Docker, and safety helpers.
 - `scripts/lib/package-install-overrides.sh` contains runtime install overrides for availability-aware package installs and installed utility commands.
-- `scripts/utilities/` contains managed utility commands copied to `/usr/local/bin`.
+- `scripts/utilities/` contains managed utility commands copied to `/usr/local/bin`, including `aliases` for printing Fish abbreviations and aliases.
 - `templates/fish/` contains Fish, Fisher, Tide, abbreviation, and fallback MOTD hook templates.
 - `templates/sysctl/` contains managed sysctl hardening templates.
 - `templates/motd/linux-cli-motd` contains the dynamic MOTD script installed on target systems.
@@ -222,7 +222,7 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 - The installer should set the timezone to `America/Detroit`.
 - Enable automatic NTP synchronization. On systemd systems, prefer DHCP-provided NTP servers and use `us.pool.ntp.org` as the fallback pool through `systemd-timesyncd`.
 - Install `time-status` and `ntp-status` into `/usr/local/bin`.
-- Install regular files from `scripts/utilities/` into `/usr/local/bin` as root-owned executable utility commands. Uninstall should remove matching managed utility commands by comparing them against the repository copies and should back up changed local files instead of deleting them.
+- Install regular files from `scripts/utilities/` into `/usr/local/bin` as root-owned executable utility commands. Uninstall should remove matching managed utility commands by comparing them against the repository copies and should back up changed local files instead of deleting them. The `aliases` utility must print all Fish abbreviations and aliases visible to the current user.
 - Install `/usr/local/sbin/linux-cli-auto-update` and `/etc/linux-cli-setup/auto-update.conf`.
 - Never commit real Pushover keys. The config template must contain placeholders only and the installed config must be root-only mode `0600`.
 - A root `.auto-update.conf` may exist for local testing with real settings, but it must stay ignored by Git. The installed runtime config is still `/etc/linux-cli-setup/auto-update.conf`.
