@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Fixed the managed Tide prompt shape so the left OS/path block and right context/time block use rounded segment caps, dark backgrounds, and visible internal dividers.
 - Fixed managed Tide prompt colors to use Fish-compatible hex values instead of raw 256-color indexes.
 - Fixed managed Tide OS segment color detection so the generated prompt receives icon, foreground, and background values.
 

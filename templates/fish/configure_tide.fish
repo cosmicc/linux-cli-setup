@@ -11,12 +11,12 @@ set -U tide_prompt_transient_enabled false
 
 set -U tide_left_prompt_frame_enabled true
 set -U tide_right_prompt_frame_enabled false
-set -U tide_left_prompt_prefix ''
-set -U tide_left_prompt_suffix ''
-set -U tide_right_prompt_prefix ''
-set -U tide_right_prompt_suffix ''
-set -U tide_left_prompt_separator_same_color ' '
-set -U tide_right_prompt_separator_same_color ' '
+set -U tide_left_prompt_prefix ''
+set -U tide_left_prompt_suffix ''
+set -U tide_right_prompt_prefix ''
+set -U tide_right_prompt_suffix ''
+set -U tide_left_prompt_separator_same_color '│'
+set -U tide_right_prompt_separator_same_color '│'
 set -U tide_left_prompt_separator_diff_color ''
 set -U tide_right_prompt_separator_diff_color ''
 
@@ -28,13 +28,11 @@ set -U _tide_right_items context time
 if functions -q _tide_detect_os
     _tide_detect_os | read -l --line os_icon os_color os_bg_color
     set -U tide_os_icon "$os_icon"
-    set -U tide_os_color "$os_color"
-    set -U tide_os_bg_color "$os_bg_color"
 else
     set -U tide_os_icon ''
-    set -U tide_os_color white
-    set -U tide_os_bg_color black
 end
+set -U tide_os_color E4E4E4
+set -U tide_os_bg_color 1C1C1C
 
 set -U tide_pwd_bg_color 1C1C1C
 set -U tide_pwd_color_anchors 00AFFF
@@ -48,18 +46,18 @@ set -U tide_pwd_markers .git
 set -U tide_character_icon '❯'
 set -U tide_character_color 5FD700
 set -U tide_character_color_failure red
-set -U tide_character_vi_icon_default '❮'
+set -U tide_character_vi_icon_default '❯'
 set -U tide_character_vi_icon_replace '▶'
 set -U tide_character_vi_icon_visual 'V'
 
 set -U tide_context_always_display true
-set -U tide_context_bg_color black
+set -U tide_context_bg_color 1C1C1C
 set -U tide_context_color_default D7AF87
 set -U tide_context_color_root red
 set -U tide_context_color_ssh D7AF87
 set -U tide_context_hostname_parts 1
 
-set -U tide_time_bg_color black
+set -U tide_time_bg_color 1C1C1C
 set -U tide_time_color 5F8787
 set -U tide_time_format '%I:%M:%S %p'
 
