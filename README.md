@@ -65,7 +65,7 @@ Available profiles:
 
 ## Core Install
 
-The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt, and a dynamic MOTD. Rerunning install refreshes the managed prompt.
+The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt, and a dynamic MOTD. Rerunning install refreshes the Tide settings and managed prompt file.
 
 It also adds common CLI tools:
 

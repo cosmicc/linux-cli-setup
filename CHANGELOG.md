@@ -18,11 +18,16 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Changed Fish plugin setup to use `zoxide` for directory jumping and added `edc/bass` to the managed Fisher plugin list.
-- Changed the managed Fish prompt template to match the reference two-line Tide prompt and documented that install/refresh runs update it after Tide configuration.
+- Changed Fish prompt management to use the reference Tide-generated `fish_prompt` loader and a complete managed Tide variable set, with install/refresh runs updating both after Tide configuration.
 - Changed `install.sh` so a fresh no-profile run installs core only, while a no-profile run on an existing linux-cli-setup install refreshes the saved profiles.
 - Changed `update.sh` into a compatibility wrapper for `install.sh` and removed the separate update implementation.
 - Changed `uninstall.sh --remove-packages` so saved-profile removal includes `core` by default, and added safe cleanup for the automatic update config.
 - Changed install and saved-profile refresh to apply best-effort basic hardening, configure UFW, and clean unused packages plus package caches near the end of each run.
+
+### Fixed
+
+- Fixed managed Tide prompt colors to use Fish-compatible hex values instead of raw 256-color indexes.
+- Fixed managed Tide OS segment color detection so the generated prompt receives icon, foreground, and background values.
 
 ## 0.2a - 2026-06-30
 
