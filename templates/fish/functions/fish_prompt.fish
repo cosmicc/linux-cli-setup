@@ -14,6 +14,10 @@ function fish_prompt
         return $last_status
     end
 
+    if not set -q _tide_prompt_3618920[1]
+        set -g _tide_prompt_3618920 (_tide_2_line_prompt)
+    end
+
     _tide_status=$status _tide_pipestatus=$pipestatus if not set -e _tide_repaint
         jobs -q && jobs -p | count | read -lx _tide_jobs
         /usr/bin/fish -c "set _tide_pipestatus $_tide_pipestatus
