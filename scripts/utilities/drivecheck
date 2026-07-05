@@ -1,0 +1,800 @@
+#!/usr/bin/env bash
+# complete-drive-test.sh
+# Fake-capacity + functionality + speed test for mounted Linux drives.
+# Requires: f3, fio, python3. Optional but recommended: smartmontools.
+
+set -u
+set -o pipefail
+
+TARGET=""
+CLASS_OVERRIDE="auto"
+ALLOW_NONEMPTY=0
+ALLOW_SYSTEM_MOUNT=0
+KEEP_FILES=0
+SKIP_FAKE_CHECK=0
+FIO_SIZE_OVERRIDE=""
+FAST=0
+
+SCRIPT_NAME="$(basename "$0")"
+
+usage() {
+    cat <<USAGE
+Usage:
+  $SCRIPT_NAME /mounted/drive/path [options]
+
+Options:
+  --class CLASS            Override inferred class.
+                           Classes: auto, usb_flash, sd_card, usb_ssd, usb_hdd,
+                                    sata_ssd, nvme, hdd, emmc, network, unknown
+  --fio-size SIZE          Override fio test size, for example 512M, 1G, 4G.
+  --fast                   Shorter fio runtime. Still performs full F3 capacity test.
+  --allow-nonempty         Allow testing a non-empty filesystem.
+                           Not recommended: fake-capacity test only verifies free space.
+  --allow-system-mount     Allow testing /, /home, /var, /tmp, etc. Not recommended.
+  --keep-files             Keep test files after finishing.
+  --skip-fake-check        Skip the full F3 fake-capacity test and run only
+                           basic R/W, metadata, SMART, and fio speed tests.
+                           This does NOT prove the advertised capacity is real.
+  -h, --help               Show this help.
+
+Recommended:
+  1. Format or empty the suspect drive first.
+  2. Mount it.
+  3. Run this script against the mount point, not against /dev/sdX.
+
+Example:
+  $SCRIPT_NAME /run/media/$USER/USBDrive
+  $SCRIPT_NAME /mnt/testdrive --class usb_ssd
+USAGE
+}
+
+log()  { printf '%s\n' "$*"; }
+info() { printf '[INFO] %s\n' "$*"; }
+warn() { printf '[WARN] %s\n' "$*"; }
+fail() { printf '[FAIL] %s\n' "$*"; }
+pass() { printf '[PASS] %s\n' "$*"; }
+
+fatal() {
+    fail "$*"
+    exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --class)
+            [[ $# -ge 2 ]] || fatal "--class requires a value"
+            CLASS_OVERRIDE="$2"
+            shift 2
+            ;;
+        --fio-size)
+            [[ $# -ge 2 ]] || fatal "--fio-size requires a value"
+            FIO_SIZE_OVERRIDE="$2"
+            shift 2
+            ;;
+        --fast)
+            FAST=1
+            shift
+            ;;
+        --allow-nonempty)
+            ALLOW_NONEMPTY=1
+            shift
+            ;;
+        --allow-system-mount)
+            ALLOW_SYSTEM_MOUNT=1
+            shift
+            ;;
+        --keep-files)
+            KEEP_FILES=1
+            shift
+            ;;
+        --skip-fake-check)
+            SKIP_FAKE_CHECK=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --*)
+            fatal "Unknown option: $1"
+            ;;
+        *)
+            if [[ -z "$TARGET" ]]; then
+                TARGET="$1"
+            else
+                fatal "Unexpected extra argument: $1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+[[ -n "$TARGET" ]] || { usage; exit 1; }
+[[ -d "$TARGET" ]] || fatal "Target is not a directory: $TARGET"
+
+for cmd in fio python3 findmnt lsblk df awk sed grep sha256sum dd sync date basename dirname readlink find wc tee rm mkdir cat tr; do
+    command -v "$cmd" >/dev/null 2>&1 || fatal "Missing required command: $cmd"
+done
+
+if [[ "$SKIP_FAKE_CHECK" -ne 1 ]]; then
+    for cmd in f3write f3read; do
+        command -v "$cmd" >/dev/null 2>&1 || fatal "Missing required command: $cmd"
+    done
+fi
+
+case "$CLASS_OVERRIDE" in
+    auto|usb_flash|sd_card|usb_ssd|usb_hdd|sata_ssd|nvme|hdd|emmc|network|unknown) ;;
+    *) fatal "Invalid --class value: $CLASS_OVERRIDE" ;;
+esac
+
+TARGET="$(readlink -f "$TARGET")"
+MOUNTPOINT="$(findmnt -n -o TARGET --target "$TARGET" 2>/dev/null || true)"
+SOURCE="$(findmnt -n -o SOURCE --target "$TARGET" 2>/dev/null || true)"
+FSTYPE="$(findmnt -n -o FSTYPE --target "$TARGET" 2>/dev/null || true)"
+MOUNTOPTS="$(findmnt -n -o OPTIONS --target "$TARGET" 2>/dev/null || true)"
+
+[[ -n "$MOUNTPOINT" ]] || fatal "Could not find mounted filesystem for: $TARGET"
+
+if [[ "$TARGET" != "$MOUNTPOINT" ]]; then
+    warn "Target is not the mount root. The whole filesystem will be filled, not only this subdirectory."
+    warn "Target: $TARGET"
+    warn "Mount:  $MOUNTPOINT"
+fi
+
+case "$MOUNTPOINT" in
+    /|/home|/var|/tmp|/usr|/opt)
+        if [[ "$ALLOW_SYSTEM_MOUNT" -ne 1 ]]; then
+            fatal "Refusing to fill system mount '$MOUNTPOINT'. Use --allow-system-mount only if you are certain."
+        fi
+        ;;
+esac
+
+if [[ ",$MOUNTOPTS," == *,ro,* ]]; then
+    fatal "Filesystem is mounted read-only: $MOUNTPOINT"
+fi
+
+[[ -w "$TARGET" ]] || fatal "Target is not writable by current user: $TARGET"
+
+NONEMPTY_COUNT="$(find "$MOUNTPOINT" -mindepth 1 -maxdepth 1 ! -name 'lost+found' 2>/dev/null | wc -l | awk '{print $1}')"
+if [[ "$NONEMPTY_COUNT" -gt 0 && "$ALLOW_NONEMPTY" -ne 1 ]]; then
+    fatal "Drive is not empty. Empty/format it first, or use --allow-nonempty to test only free space."
+fi
+
+DISK=""
+DISK_BASE=""
+PKNAME=""
+MODEL="unknown"
+SERIAL="unknown"
+TRAN="unknown"
+ROTA="unknown"
+RM="unknown"
+SIZE_HUMAN="unknown"
+USB_SPEED_MBPS="unknown"
+INFERRED_CLASS="unknown"
+SMART_HEALTH="unknown"
+SMART_NOTE="not checked"
+
+if [[ "$SOURCE" == /dev/* ]]; then
+    PKNAME="$(lsblk -no PKNAME "$SOURCE" 2>/dev/null | awk 'NF{print $1; exit}' || true)"
+    if [[ -n "$PKNAME" ]]; then
+        DISK="/dev/$PKNAME"
+    else
+        DISK="$SOURCE"
+    fi
+
+    DISK_BASE="$(basename "$DISK")"
+    MODEL="$(lsblk -dn -o MODEL "$DISK" 2>/dev/null | sed 's/^ *//;s/ *$//' || true)"
+    SERIAL="$(lsblk -dn -o SERIAL "$DISK" 2>/dev/null | sed 's/^ *//;s/ *$//' || true)"
+    TRAN="$(lsblk -dn -o TRAN "$DISK" 2>/dev/null | awk 'NF{print $1; exit}' || true)"
+    ROTA="$(lsblk -dn -o ROTA "$DISK" 2>/dev/null | awk 'NF{print $1; exit}' || true)"
+    RM="$(lsblk -dn -o RM "$DISK" 2>/dev/null | awk 'NF{print $1; exit}' || true)"
+    SIZE_HUMAN="$(lsblk -dn -o SIZE "$DISK" 2>/dev/null | awk '{$1=$1; print}' || true)"
+
+    [[ -n "$MODEL" ]] || MODEL="unknown"
+    [[ -n "$SERIAL" ]] || SERIAL="unknown"
+    [[ -n "$TRAN" ]] || TRAN="unknown"
+    [[ -n "$ROTA" ]] || ROTA="unknown"
+    [[ -n "$RM" ]] || RM="unknown"
+
+    SYS_PATH="$(readlink -f "/sys/block/$DISK_BASE/device" 2>/dev/null || true)"
+    while [[ -n "$SYS_PATH" && "$SYS_PATH" != "/" ]]; do
+        if [[ -r "$SYS_PATH/speed" ]]; then
+            USB_SPEED_MBPS="$(cat "$SYS_PATH/speed" 2>/dev/null || true)"
+            break
+        fi
+        SYS_PATH="$(dirname "$SYS_PATH")"
+    done
+else
+    DISK="not-a-local-block-device"
+    INFERRED_CLASS="network"
+fi
+
+infer_class() {
+    local class="unknown"
+    local model_lc
+    model_lc="$(printf '%s' "$MODEL" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "$SOURCE" != /dev/* ]]; then
+        class="network"
+    elif [[ "$DISK_BASE" == nvme* || "$TRAN" == "nvme" ]]; then
+        class="nvme"
+    elif [[ "$DISK_BASE" == mmcblk* || "$TRAN" == "mmc" ]]; then
+        if [[ "$RM" == "1" ]]; then
+            class="sd_card"
+        else
+            class="emmc"
+        fi
+    elif [[ "$TRAN" == "usb" ]]; then
+        if [[ "$ROTA" == "1" ]]; then
+            class="usb_hdd"
+        elif [[ "$model_lc" =~ ssd|nvme|portable|t5|t7|extreme|x8|x9|x10|elements ]]; then
+            class="usb_ssd"
+        else
+            class="usb_flash"
+        fi
+    elif [[ "$ROTA" == "1" ]]; then
+        class="hdd"
+    elif [[ "$ROTA" == "0" && ( "$TRAN" == "sata" || "$TRAN" == "ata" || "$TRAN" == "scsi" ) ]]; then
+        class="sata_ssd"
+    elif [[ "$ROTA" == "0" ]]; then
+        class="sata_ssd"
+    else
+        class="unknown"
+    fi
+
+    printf '%s\n' "$class"
+}
+
+if [[ "$CLASS_OVERRIDE" == "auto" ]]; then
+    INFERRED_CLASS="$(infer_class)"
+else
+    INFERRED_CLASS="$CLASS_OVERRIDE"
+fi
+
+if [[ "$SOURCE" == /dev/* ]] && command -v smartctl >/dev/null 2>&1; then
+    SMART_CMD=(smartctl -H "$DISK")
+    if [[ "$TRAN" == "usb" ]]; then
+        SMART_CMD=(smartctl -d sat -H "$DISK")
+    fi
+
+    SMART_OUT=""
+    SMART_RC=99
+    if [[ $EUID -eq 0 ]]; then
+        SMART_OUT="$("${SMART_CMD[@]}" 2>&1)"; SMART_RC=$?
+        if [[ "$SMART_RC" -ne 0 && "$TRAN" == "usb" ]]; then
+            SMART_OUT="$(smartctl -H "$DISK" 2>&1)"; SMART_RC=$?
+        fi
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        SMART_OUT="$(sudo "${SMART_CMD[@]}" 2>&1)"; SMART_RC=$?
+        if [[ "$SMART_RC" -ne 0 && "$TRAN" == "usb" ]]; then
+            SMART_OUT="$(sudo smartctl -H "$DISK" 2>&1)"; SMART_RC=$?
+        fi
+    else
+        SMART_NOTE="smartctl installed, but root/sudo is needed"
+    fi
+
+    if [[ -n "$SMART_OUT" ]]; then
+        if printf '%s\n' "$SMART_OUT" | grep -Eqi 'PASSED|OK'; then
+            SMART_HEALTH="passed"
+            SMART_NOTE="SMART health passed"
+        elif printf '%s\n' "$SMART_OUT" | grep -Eqi 'FAILED|failing|BAD'; then
+            SMART_HEALTH="failed"
+            SMART_NOTE="SMART reports failure"
+        else
+            SMART_HEALTH="unknown"
+            SMART_NOTE="SMART available but health was not clearly reported"
+        fi
+    fi
+else
+    SMART_NOTE="smartctl not installed or not a local block device"
+fi
+
+AVAIL_BYTES="$(df -B1 --output=avail "$MOUNTPOINT" | tail -n 1 | awk '{print $1}')"
+TOTAL_BYTES="$(df -B1 --output=size "$MOUNTPOINT" | tail -n 1 | awk '{print $1}')"
+
+choose_fio_size() {
+    if [[ -n "$FIO_SIZE_OVERRIDE" ]]; then
+        printf '%s\n' "$FIO_SIZE_OVERRIDE"
+        return
+    fi
+
+    if [[ "$AVAIL_BYTES" -lt 1073741824 ]]; then
+        printf '128M\n'
+    elif [[ "$AVAIL_BYTES" -lt 4294967296 ]]; then
+        printf '512M\n'
+    elif [[ "$AVAIL_BYTES" -lt 8589934592 ]]; then
+        printf '1G\n'
+    else
+        printf '4G\n'
+    fi
+}
+
+FIO_SIZE="$(choose_fio_size)"
+FIO_RUNTIME_SEQ=20
+FIO_RUNTIME_RAND=30
+
+if [[ "$FAST" -eq 1 ]]; then
+    FIO_RUNTIME_SEQ=8
+    FIO_RUNTIME_RAND=12
+fi
+
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+TESTROOT="$TARGET/.drive-test-$TIMESTAMP"
+F3DIR="$TESTROOT/f3-capacity"
+SPEEDDIR="$TESTROOT/fio-speed"
+LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/drive-test-logs-$TIMESTAMP.XXXXXX")"
+
+mkdir -p "$F3DIR" "$SPEEDDIR" || fatal "Could not create test directory: $TESTROOT"
+
+cleanup() {
+    if [[ "$KEEP_FILES" -ne 1 && -d "$TESTROOT" ]]; then
+        rm -rf "$TESTROOT" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+print_header() {
+    log ""
+    log "============================================================"
+    log " Complete Drive Test"
+    log "============================================================"
+    log "Target path:        $TARGET"
+    log "Mount point:        $MOUNTPOINT"
+    log "Source:             $SOURCE"
+    log "Filesystem:         $FSTYPE"
+    log "Mount options:      $MOUNTOPTS"
+    log "Disk:               $DISK"
+    log "Model:              $MODEL"
+    log "Serial:             $SERIAL"
+    log "Reported disk size: $SIZE_HUMAN"
+    log "Filesystem size:    $TOTAL_BYTES bytes"
+    log "Free space:         $AVAIL_BYTES bytes"
+    log "Transport:          $TRAN"
+    log "Rotational:         $ROTA"
+    log "Removable:          $RM"
+    log "USB speed:          $USB_SPEED_MBPS Mbps"
+    log "Inferred class:     $INFERRED_CLASS"
+    log "SMART:              $SMART_NOTE"
+    log "fio test size:      $FIO_SIZE"
+    log "Skip fake check:    $SKIP_FAKE_CHECK"
+    log "Test directory:     $TESTROOT"
+    log "Log directory:      $LOGDIR"
+    log "============================================================"
+    log ""
+}
+
+print_header
+
+warn "This test will fill the filesystem with F3 test files."
+warn "On a fake drive, existing data can be corrupted when the fake capacity wraps."
+
+if [[ "$ALLOW_NONEMPTY" -eq 1 ]]; then
+    warn "--allow-nonempty is set. Capacity verification only covers currently free space."
+fi
+
+log ""
+read -r -p "Type YES to start: " CONFIRM
+[[ "$CONFIRM" == "YES" ]] || fatal "Cancelled."
+
+FUNC_SCORE=100
+FUNC_GRADE="F"
+SPEED_SCORE=0
+SPEED_GRADE="F"
+FAKE_STATUS="not tested"
+BASIC_RW_STATUS="not tested"
+METADATA_STATUS="not tested"
+FIO_STATUS="not tested"
+
+info "Running basic write/sync/read checksum test..."
+BASIC_FILE="$TESTROOT/basic-rw.bin"
+
+if dd if=/dev/urandom of="$BASIC_FILE" bs=1M count=64 conv=fsync status=none 2>"$LOGDIR/basic-write.err"; then
+    SUM1="$(sha256sum "$BASIC_FILE" | awk '{print $1}')"
+    sync
+    SUM2="$(sha256sum "$BASIC_FILE" | awk '{print $1}')"
+
+    if [[ "$SUM1" == "$SUM2" ]]; then
+        BASIC_RW_STATUS="passed"
+        pass "Basic read/write checksum passed."
+    else
+        BASIC_RW_STATUS="failed"
+        FUNC_SCORE=$((FUNC_SCORE - 60))
+        fail "Basic read/write checksum mismatch."
+    fi
+else
+    BASIC_RW_STATUS="failed"
+    FUNC_SCORE=0
+    fail "Basic write failed."
+fi
+
+info "Running small-file metadata test..."
+METADIR="$TESTROOT/metadata"
+mkdir -p "$METADIR"
+
+META_OK=1
+for i in $(seq 1 500); do
+    printf 'drive metadata test %s %s\n' "$i" "$TIMESTAMP" > "$METADIR/file-$i.txt" || { META_OK=0; break; }
+done
+
+sync
+
+for i in $(seq 1 500); do
+    grep -q "drive metadata test $i" "$METADIR/file-$i.txt" || { META_OK=0; break; }
+done
+
+rm -rf "$METADIR" || META_OK=0
+sync
+
+if [[ "$META_OK" -eq 1 ]]; then
+    METADATA_STATUS="passed"
+    pass "Small-file metadata test passed."
+else
+    METADATA_STATUS="failed"
+    FUNC_SCORE=$((FUNC_SCORE - 30))
+    fail "Small-file metadata test failed."
+fi
+
+case "$SMART_HEALTH" in
+    passed) ;;
+    failed) FUNC_SCORE=$((FUNC_SCORE - 60)) ;;
+    unknown) ;;
+esac
+
+if [[ "$SKIP_FAKE_CHECK" -eq 1 ]]; then
+    FAKE_STATUS="skipped"
+    warn "Skipping F3 fake-capacity verification by request."
+    warn "This run cannot prove the advertised capacity is real."
+else
+    info "Running F3 fake-capacity write test. This can take a long time on large or slow drives."
+    F3_LOG="$LOGDIR/f3.log"
+    F3WRITE_RC=0
+    F3READ_RC=0
+
+    f3write "$F3DIR" 2>&1 | tee "$F3_LOG" || F3WRITE_RC=${PIPESTATUS[0]}
+    sync
+
+    info "Running F3 fake-capacity read/verify test..."
+    f3read "$F3DIR" 2>&1 | tee -a "$F3_LOG" || F3READ_RC=${PIPESTATUS[0]}
+    sync
+
+    f3_zero_line() {
+        local label="$1"
+        grep -E "${label}:[[:space:]]+0\.00 Byte[[:space:]]+\(0 sectors\)" "$F3_LOG" >/dev/null 2>&1
+    }
+
+    if [[ "$F3WRITE_RC" -eq 0 && "$F3READ_RC" -eq 0 ]] &&
+       f3_zero_line "Data LOST" &&
+       f3_zero_line "Corrupted" &&
+       f3_zero_line "Slightly changed" &&
+       f3_zero_line "Overwritten"; then
+        FAKE_STATUS="passed"
+        pass "F3 capacity verification passed. No fake-capacity evidence found."
+    else
+        FAKE_STATUS="failed"
+        FUNC_SCORE=0
+        SPEED_SCORE=0
+        FUNC_GRADE="F"
+        SPEED_GRADE="F"
+
+        fail "F3 capacity verification failed. Treat this drive as fake, corrupt, or unsafe."
+        log ""
+        log "Final grades:"
+        log "  Functionality: F"
+        log "  Speed:         F"
+        log ""
+        log "Reason: fake-capacity/corruption verification failed, so further testing was skipped."
+        log "F3 log: $F3_LOG"
+        exit 2
+    fi
+fi
+
+rm -rf "$F3DIR"
+sync
+mkdir -p "$F3DIR"
+
+run_fio() {
+    local name="$1"
+    local rw="$2"
+    local bs="$3"
+    local iodepth="$4"
+    local numjobs="$5"
+    local runtime="$6"
+    local file="$7"
+    local json="$8"
+    local direct=1
+
+    fio --name="$name" \
+        --filename="$file" \
+        --size="$FIO_SIZE" \
+        --rw="$rw" \
+        --bs="$bs" \
+        --direct="$direct" \
+        --ioengine=libaio \
+        --iodepth="$iodepth" \
+        --numjobs="$numjobs" \
+        --runtime="$runtime" \
+        --time_based \
+        --group_reporting \
+        --randrepeat=0 \
+        --refill_buffers \
+        --end_fsync=1 \
+        --output-format=json \
+        --output="$json" >/dev/null 2>"$json.err"
+
+    local rc=$?
+
+    if [[ "$rc" -ne 0 ]]; then
+        warn "fio direct I/O failed for $name. Retrying with direct=0; speed may be cache-influenced."
+        direct=0
+
+        fio --name="$name" \
+            --filename="$file" \
+            --size="$FIO_SIZE" \
+            --rw="$rw" \
+            --bs="$bs" \
+            --direct="$direct" \
+            --ioengine=sync \
+            --iodepth=1 \
+            --numjobs="$numjobs" \
+            --runtime="$runtime" \
+            --time_based \
+            --group_reporting \
+            --randrepeat=0 \
+            --refill_buffers \
+            --end_fsync=1 \
+            --output-format=json \
+            --output="$json" >/dev/null 2>>"$json.err"
+
+        rc=$?
+    fi
+
+    return "$rc"
+}
+
+parse_fio() {
+    local json="$1"
+
+    python3 - "$json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+
+with open(path, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+jobs = data.get('jobs', [])
+read_bw = sum(float(j.get('read', {}).get('bw_bytes', 0) or 0) for j in jobs)
+write_bw = sum(float(j.get('write', {}).get('bw_bytes', 0) or 0) for j in jobs)
+read_iops = sum(float(j.get('read', {}).get('iops', 0) or 0) for j in jobs)
+write_iops = sum(float(j.get('write', {}).get('iops', 0) or 0) for j in jobs)
+
+def avg_lat_ms(kind):
+    total = 0.0
+    ios = 0.0
+
+    for j in jobs:
+        section = j.get(kind, {})
+        clat = section.get('clat_ns', {}) or {}
+        mean = float(clat.get('mean', 0) or 0)
+        count = float(section.get('total_ios', 0) or 0)
+        total += mean * count
+        ios += count
+
+    return (total / ios / 1_000_000.0) if ios else 0.0
+
+print(f"read_bw_mb={read_bw / 1048576.0:.2f}")
+print(f"write_bw_mb={write_bw / 1048576.0:.2f}")
+print(f"read_iops={read_iops:.2f}")
+print(f"write_iops={write_iops:.2f}")
+print(f"read_lat_ms={avg_lat_ms('read'):.3f}")
+print(f"write_lat_ms={avg_lat_ms('write'):.3f}")
+PY
+}
+
+info "Running sequential write speed test with fio..."
+
+SEQW_JSON="$LOGDIR/fio-seqwrite.json"
+SEQR_JSON="$LOGDIR/fio-seqread.json"
+RAND_JSON="$LOGDIR/fio-randrw.json"
+SEQ_FILE="$SPEEDDIR/seq.dat"
+RAND_FILE="$SPEEDDIR/rand.dat"
+
+SEQ_WRITE_MB=0
+SEQ_READ_MB=0
+RAND_READ_IOPS=0
+RAND_WRITE_IOPS=0
+RAND_READ_LAT_MS=0
+RAND_WRITE_LAT_MS=0
+
+if run_fio "seqwrite" "write" "1M" 16 1 "$FIO_RUNTIME_SEQ" "$SEQ_FILE" "$SEQW_JSON"; then
+    eval "$(parse_fio "$SEQW_JSON" | sed 's/^/SEQW_/')"
+    SEQ_WRITE_MB="${SEQW_write_bw_mb:-0}"
+    pass "Sequential write test completed: ${SEQ_WRITE_MB} MB/s"
+else
+    FIO_STATUS="failed"
+    FUNC_SCORE=$((FUNC_SCORE - 20))
+    fail "Sequential write fio test failed."
+fi
+
+sync
+
+info "Running sequential read speed test with fio..."
+
+if run_fio "seqread" "read" "1M" 16 1 "$FIO_RUNTIME_SEQ" "$SEQ_FILE" "$SEQR_JSON"; then
+    eval "$(parse_fio "$SEQR_JSON" | sed 's/^/SEQR_/')"
+    SEQ_READ_MB="${SEQR_read_bw_mb:-0}"
+    pass "Sequential read test completed: ${SEQ_READ_MB} MB/s"
+else
+    FIO_STATUS="failed"
+    FUNC_SCORE=$((FUNC_SCORE - 20))
+    fail "Sequential read fio test failed."
+fi
+
+sync
+
+info "Running random 4K read/write speed test with fio..."
+
+if run_fio "randrw" "randrw" "4k" 32 4 "$FIO_RUNTIME_RAND" "$RAND_FILE" "$RAND_JSON"; then
+    eval "$(parse_fio "$RAND_JSON" | sed 's/^/RAND_/')"
+    RAND_READ_IOPS="${RAND_read_iops:-0}"
+    RAND_WRITE_IOPS="${RAND_write_iops:-0}"
+    RAND_READ_LAT_MS="${RAND_read_lat_ms:-0}"
+    RAND_WRITE_LAT_MS="${RAND_write_lat_ms:-0}"
+    FIO_STATUS="passed"
+    pass "Random test completed: read ${RAND_READ_IOPS} IOPS, write ${RAND_WRITE_IOPS} IOPS"
+else
+    FIO_STATUS="failed"
+    FUNC_SCORE=$((FUNC_SCORE - 20))
+    fail "Random fio test failed."
+fi
+
+sync
+
+if [[ "$ALLOW_NONEMPTY" -eq 1 && "$FUNC_SCORE" -gt 84 ]]; then
+    FUNC_SCORE=84
+fi
+
+if [[ "$SKIP_FAKE_CHECK" -eq 1 && "$FUNC_SCORE" -gt 87 ]]; then
+    FUNC_SCORE=87
+fi
+
+if [[ "$FUNC_SCORE" -lt 0 ]]; then
+    FUNC_SCORE=0
+fi
+
+if [[ "$FUNC_SCORE" -gt 100 ]]; then
+    FUNC_SCORE=100
+fi
+
+GRADE_OUT="$(python3 - "$FUNC_SCORE" "$INFERRED_CLASS" "$USB_SPEED_MBPS" "$SEQ_READ_MB" "$SEQ_WRITE_MB" "$RAND_READ_IOPS" "$RAND_WRITE_IOPS" <<'PY'
+import sys
+
+func_score = float(sys.argv[1])
+cls = sys.argv[2]
+
+try:
+    usb_speed = float(sys.argv[3])
+except Exception:
+    usb_speed = 0.0
+
+seq_read = float(sys.argv[4])
+seq_write = float(sys.argv[5])
+rand_read = float(sys.argv[6])
+rand_write = float(sys.argv[7])
+
+def letter(score):
+    if score >= 97:
+        return 'A+'
+    if score >= 93:
+        return 'A'
+    if score >= 90:
+        return 'A-'
+    if score >= 87:
+        return 'B+'
+    if score >= 83:
+        return 'B'
+    if score >= 80:
+        return 'B-'
+    if score >= 77:
+        return 'C+'
+    if score >= 73:
+        return 'C'
+    if score >= 70:
+        return 'C-'
+    if score >= 67:
+        return 'D+'
+    if score >= 63:
+        return 'D'
+    if score >= 60:
+        return 'D-'
+    return 'F'
+
+targets = {
+    'nvme':      {'sr': 2500, 'sw': 1500, 'rr': 150000, 'rw': 80000},
+    'sata_ssd':  {'sr': 450,  'sw': 350,  'rr': 30000,  'rw': 15000},
+    'usb_ssd':   {'sr': 350,  'sw': 250,  'rr': 15000,  'rw': 8000},
+    'hdd':       {'sr': 120,  'sw': 100,  'rr': 120,    'rw': 100},
+    'usb_hdd':   {'sr': 100,  'sw': 90,   'rr': 100,    'rw': 80},
+    'usb_flash': {'sr': 80,   'sw': 25,   'rr': 400,    'rw': 40},
+    'sd_card':   {'sr': 80,   'sw': 30,   'rr': 300,    'rw': 30},
+    'emmc':      {'sr': 180,  'sw': 80,   'rr': 5000,   'rw': 1500},
+    'network':   {'sr': 100,  'sw': 100,  'rr': 500,    'rw': 300},
+    'unknown':   {'sr': 80,   'sw': 30,   'rr': 400,    'rw': 40},
+}
+
+t = dict(targets.get(cls, targets['unknown']))
+
+if cls.startswith('usb') and usb_speed and usb_speed <= 480:
+    t['sr'] = min(t['sr'], 35)
+    t['sw'] = min(t['sw'], 30)
+    t['rr'] = min(t['rr'], 250)
+    t['rw'] = min(t['rw'], 150)
+
+def comp(actual, target):
+    if target <= 0:
+        return 0.0
+
+    return min(110.0, max(0.0, actual / target * 100.0))
+
+speed_score = (
+    comp(seq_read,  t['sr']) * 0.25 +
+    comp(seq_write, t['sw']) * 0.35 +
+    comp(rand_read, t['rr']) * 0.20 +
+    comp(rand_write,t['rw']) * 0.20
+)
+
+speed_score = min(100.0, speed_score)
+
+print(f"FUNC_GRADE={letter(func_score)}")
+print(f"SPEED_SCORE={speed_score:.1f}")
+print(f"SPEED_GRADE={letter(speed_score)}")
+print(f"TARGET_SEQ_READ={t['sr']}")
+print(f"TARGET_SEQ_WRITE={t['sw']}")
+print(f"TARGET_RAND_READ={t['rr']}")
+print(f"TARGET_RAND_WRITE={t['rw']}")
+PY
+)"
+
+eval "$GRADE_OUT"
+
+log ""
+log "============================================================"
+log " Final Result"
+log "============================================================"
+log "Fake-capacity test:    $FAKE_STATUS"
+log "Basic R/W test:        $BASIC_RW_STATUS"
+log "Metadata test:         $METADATA_STATUS"
+log "SMART:                 $SMART_NOTE"
+log "fio status:            $FIO_STATUS"
+log ""
+log "Inferred speed class:  $INFERRED_CLASS"
+log "Speed targets used:    read ${TARGET_SEQ_READ:-?} MB/s, write ${TARGET_SEQ_WRITE:-?} MB/s,"
+log "                       rand read ${TARGET_RAND_READ:-?} IOPS, rand write ${TARGET_RAND_WRITE:-?} IOPS"
+log "Measured seq read:     ${SEQ_READ_MB} MB/s"
+log "Measured seq write:    ${SEQ_WRITE_MB} MB/s"
+log "Measured rand read:    ${RAND_READ_IOPS} IOPS, avg latency ${RAND_READ_LAT_MS} ms"
+log "Measured rand write:   ${RAND_WRITE_IOPS} IOPS, avg latency ${RAND_WRITE_LAT_MS} ms"
+log ""
+log "Functionality grade:   ${FUNC_GRADE} (${FUNC_SCORE}/100)"
+log "Speed grade:           ${SPEED_GRADE} (${SPEED_SCORE}/100)"
+if [[ "$SKIP_FAKE_CHECK" -eq 1 ]]; then
+    log ""
+    log "Capacity warning:      fake-capacity verification was skipped; functionality grade is capped at B+."
+fi
+log ""
+log "Logs saved under:      $LOGDIR"
+
+if [[ "$KEEP_FILES" -eq 1 ]]; then
+    log "Test files kept at:    $TESTROOT"
+else
+    log "Test files:            removed automatically"
+fi
+
+log "============================================================"
+
+if [[ "$FUNC_GRADE" == "F" ]]; then
+    exit 3
+fi
+
+exit 0

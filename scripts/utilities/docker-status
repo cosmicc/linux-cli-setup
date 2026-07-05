@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+echo "============================================================"
+echo " Docker Host Status"
+echo " Host: $(hostname)"
+echo " Time: $(date)"
+echo "============================================================"
+echo
+
+echo "OS:"
+cat /etc/os-release | grep -E 'PRETTY_NAME|VERSION_CODENAME'
+echo
+
+echo "Kernel:"
+uname -a
+echo
+
+echo "Docker:"
+docker version --format 'Client: {{.Client.Version}} | Server: {{.Server.Version}}' 2>/dev/null || sudo docker version
+echo
+
+echo "Docker Compose:"
+docker compose version 2>/dev/null || sudo docker compose version
+echo
+
+echo "Docker service:"
+systemctl is-enabled docker | sed 's/^/Enabled: /'
+systemctl is-active docker | sed 's/^/Active:  /'
+echo
+
+echo "Swarm:"
+docker info 2>/dev/null | grep -A8 'Swarm:' || sudo docker info | grep -A8 'Swarm:'
+echo
+
+echo "Containers:"
+docker ps 2>/dev/null || sudo docker ps
+echo
+
+echo "Disk:"
+df -h /
+df -h /var/lib/docker 2>/dev/null || true
+echo
+
+echo "Listening ports:"
+ss -lntup
