@@ -5,8 +5,10 @@
 # character on the second line.
 
 function fish_prompt
+    set -l last_status $status
+    set -l last_pipestatus $pipestatus
+
     if not functions -q _tide_2_line_prompt
-        set -l last_status $status
         echo
         set_color green
         echo -n '❯ '
@@ -14,13 +16,17 @@ function fish_prompt
         return $last_status
     end
 
+    set -g _tide_status $last_status
+    set -g _tide_pipestatus $last_pipestatus
+
     if not set -q _tide_prompt_3618920[1]
         set -g _tide_prompt_3618920 (_tide_2_line_prompt)
     end
 
-    _tide_status=$status _tide_pipestatus=$pipestatus if not set -e _tide_repaint
+    _tide_status=$last_status _tide_pipestatus=$last_pipestatus if not set -e _tide_repaint
         jobs -q && jobs -p | count | read -lx _tide_jobs
-        /usr/bin/fish -c "set _tide_pipestatus $_tide_pipestatus
+        /usr/bin/fish -c "set _tide_status $last_status
+set _tide_pipestatus $last_pipestatus
 set _tide_parent_dirs $_tide_parent_dirs
 PATH=$(string escape "$PATH") CMD_DURATION=$CMD_DURATION fish_bind_mode=$fish_bind_mode set _tide_prompt_3618920 (_tide_2_line_prompt)" &
         builtin disown
