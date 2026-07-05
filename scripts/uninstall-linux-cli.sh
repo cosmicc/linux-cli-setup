@@ -275,6 +275,7 @@ main() {
 
     require_root
     init_logging uninstall
+    init_package_family
     self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     init_runtime_context
     PACKAGE_STEP_VERB="Uninstalling"

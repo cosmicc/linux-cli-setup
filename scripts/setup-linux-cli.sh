@@ -108,6 +108,7 @@ main() {
 
     require_root
     init_logging install
+    init_package_family
     self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     start_transaction
     trap transaction_error_trap ERR

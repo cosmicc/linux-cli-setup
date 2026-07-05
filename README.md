@@ -9,6 +9,8 @@ Current unreleased alpha testing version: `0.3a`.
 - Arch-based systems with `pacman`; the installer also ensures `yay` is installed.
 - Debian/Ubuntu-based systems with `apt`; scripts use `apt-get` even when `nala` is installed for interactive use.
 
+On systems without `pacman` or `apt-get`, `install.sh`, `update.sh`, and `uninstall.sh` stop before self-update or managed-file changes and report that the system is unsupported.
+
 ## Quick Start
 
 Run from the user account that should receive Fish as the default shell:

@@ -54,8 +54,7 @@ main() {
     fi
 
     init_logging_with_user_fallback install-test
-    PACKAGE_FAMILY="$(detect_package_family)"
-    export PACKAGE_FAMILY
+    init_package_family
 
     log "Detected package family: $PACKAGE_FAMILY"
     log "Checking profiles: $(selected_profiles_csv)"

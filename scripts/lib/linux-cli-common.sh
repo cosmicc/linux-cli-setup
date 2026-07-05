@@ -608,7 +608,22 @@ detect_package_family() {
         return
     fi
 
-    die "Unsupported distribution. This project supports Arch/pacman and Debian/Ubuntu/apt systems."
+    return 1
+}
+
+unsupported_distribution_message() {
+    printf 'Unsupported distribution. install.sh, update.sh, and uninstall.sh must run on an Arch-based system with pacman or a Debian/Ubuntu-based system with apt-get.'
+}
+
+require_supported_package_family() {
+    die "$(unsupported_distribution_message)"
+}
+
+init_package_family() {
+    if ! PACKAGE_FAMILY="$(detect_package_family)"; then
+        require_supported_package_family
+    fi
+    export PACKAGE_FAMILY
 }
 
 init_runtime_context() {
@@ -618,7 +633,9 @@ init_runtime_context() {
     TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
     TARGET_GROUP="$(id -gn "$TARGET_USER")"
     ORIGINAL_SHELL="$(getent passwd "$TARGET_USER" | cut -d: -f7)"
-    PACKAGE_FAMILY="$(detect_package_family)"
+    if [[ -z "${PACKAGE_FAMILY:-}" ]]; then
+        init_package_family
+    fi
 
     [[ -d "$TARGET_HOME" ]] || die "Target home directory $TARGET_HOME does not exist."
 

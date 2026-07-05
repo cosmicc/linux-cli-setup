@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Fixed install, update, uninstall, and package availability tests to fail clearly on systems without `pacman` or `apt-get`, before self-update or managed-file changes.
 - Fixed the managed Tide prompt shape so the left OS/path block and right context/time block use rounded segment caps, dark backgrounds, and visible internal dividers.
 - Fixed the managed Tide right prompt so the command-duration segment appears before context/time after long-running commands.
 - Fixed managed Tide prompt colors to use Fish-compatible hex values instead of raw 256-color indexes.

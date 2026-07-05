@@ -54,6 +54,7 @@ Keep `core` first in install, refresh execution order, and saved state. When `in
 - The installer must be run as root, normally through `sudo ./install.sh`.
 - The target account is the sudoing user from `$SUDO_USER`, not `root`. Root-only direct runs must require `TARGET_USER=username` or saved state.
 - Package-family detection should stay conservative: prefer `pacman` for Arch-based systems and `apt-get` for Debian/Ubuntu-based systems.
+- Install, update, uninstall, and package availability tests must fail clearly on systems without `pacman` or `apt-get`. Install/update/uninstall should run this support check after root/log initialization and before GitHub self-update or managed-file changes.
 - Arch installs must ensure `yay` is available before AUR fallback installs.
 - Debian/Ubuntu scripts must use noninteractive `apt-get`. Installing `nala` is fine, but scripts must not depend on it.
 - Existing user Fish files must be backed up before replacement unless the installed file already matches the project template.
