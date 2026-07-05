@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Added `--skip-performance` and `--skip-hardening` options for hosts that need to avoid those managed changes.
 - Added a `timecheck` utility with an `ntpcheck` alias for chrony/NTP status, selected time source, and stratum details.
 - Added transaction signal handling so interrupted install, refresh, and uninstall runs roll back before exiting.
+- Added a transaction exit backstop so unexpected nonzero install, refresh, and uninstall exits roll back active changes while skipping over rollback-command failures.
 
 ### Changed
 

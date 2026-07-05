@@ -50,6 +50,7 @@ CURRENT_STEP_OUTPUT=""
 ROLLBACK_FILE=""
 ROLLBACK_ENABLED=0
 ROLLBACK_RUNNING=0
+TRANSACTION_EXIT_HANDLED=0
 SELF_UPDATE_RUN_USER=""
 
 if [[ -n "${NO_COLOR:-}" || "${TERM:-}" == "dumb" ]]; then
@@ -217,11 +218,14 @@ trim_string() {
 start_transaction() {
     ROLLBACK_FILE="$(mktemp)"
     ROLLBACK_ENABLED=1
+    ROLLBACK_RUNNING=0
+    TRANSACTION_EXIT_HANDLED=0
     debug "Rollback transaction started at $ROLLBACK_FILE"
 }
 
 commit_transaction() {
     ROLLBACK_ENABLED=0
+    TRANSACTION_EXIT_HANDLED=1
     [[ -n "$ROLLBACK_FILE" ]] && rm -f "$ROLLBACK_FILE"
     ROLLBACK_FILE=""
     debug "Rollback transaction committed"
@@ -269,7 +273,8 @@ transaction_signal_trap() {
     local exit_code
 
     exit_code="$(transaction_signal_exit_code "$signal_name")"
-    trap - ERR HUP INT QUIT TERM
+    TRANSACTION_EXIT_HANDLED=1
+    trap - ERR EXIT HUP INT QUIT TERM
     error "Received $signal_name; rolling back changes before exiting."
     show_step_tail
     rollback_changes
@@ -278,6 +283,7 @@ transaction_signal_trap() {
 
 register_transaction_traps() {
     trap transaction_error_trap ERR
+    trap transaction_exit_trap EXIT
     trap 'transaction_signal_trap HUP' HUP
     trap 'transaction_signal_trap INT' INT
     trap 'transaction_signal_trap QUIT' QUIT
@@ -285,15 +291,33 @@ register_transaction_traps() {
 }
 
 clear_transaction_traps() {
-    trap - ERR HUP INT QUIT TERM
+    trap - ERR EXIT HUP INT QUIT TERM
 }
 
 transaction_error_trap() {
     local rc=$?
 
     [[ "$rc" -eq 0 ]] && return 0
-    trap - ERR HUP INT QUIT TERM
+    TRANSACTION_EXIT_HANDLED=1
+    trap - ERR EXIT HUP INT QUIT TERM
     error "Script failed with exit code $rc."
+    show_step_tail
+    rollback_changes
+    exit "$rc"
+}
+
+transaction_exit_trap() {
+    local rc=$?
+
+    [[ "$rc" -eq 0 ]] && return 0
+    if [[ "$TRANSACTION_EXIT_HANDLED" -ne 0 || "$ROLLBACK_ENABLED" -ne 1 ]]; then
+        trap - ERR EXIT HUP INT QUIT TERM
+        exit "$rc"
+    fi
+
+    TRANSACTION_EXIT_HANDLED=1
+    trap - ERR EXIT HUP INT QUIT TERM
+    error "Script exited with code $rc; rolling back changes before exiting."
     show_step_tail
     rollback_changes
     exit "$rc"
