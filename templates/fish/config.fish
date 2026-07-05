@@ -14,7 +14,16 @@ if status is-interactive
     end
 
     if command -q atuin
-        atuin init fish | source
+        set -l linux_cli_config_home "$HOME/.config"
+        if set -q XDG_CONFIG_HOME; and test -n "$XDG_CONFIG_HOME"
+            set linux_cli_config_home "$XDG_CONFIG_HOME"
+        end
+
+        if test -d "$linux_cli_config_home"; or mkdir -p "$linux_cli_config_home" 2>/dev/null
+            if test -w "$linux_cli_config_home"
+                atuin init fish | source
+            end
+        end
     end
 
     if command -q zoxide
