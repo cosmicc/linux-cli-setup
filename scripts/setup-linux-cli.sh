@@ -8,6 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/linux-cli-common.sh
 source "$SCRIPT_DIR/lib/linux-cli-common.sh"
+# shellcheck source=scripts/lib/package-install-overrides.sh
+source "$SCRIPT_DIR/lib/package-install-overrides.sh"
 
 show_help() {
     cat <<'HELP'
