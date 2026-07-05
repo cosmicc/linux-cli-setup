@@ -41,6 +41,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Fixed `install_test.sh` logging fallback when `/var/log/linux-cli-setup` exists but is not writable by the current user.
+- Fixed non-interactive Tide prompt configuration returning exit code `1` when Tide OS detection is unavailable even though the fallback OS icon was written.
 
 ## 0.3a - 07.05.2026
 

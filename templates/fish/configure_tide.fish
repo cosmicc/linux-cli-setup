@@ -25,12 +25,14 @@ set -U tide_right_prompt_items status cmd_duration context jobs direnv bun node 
 set -U _tide_left_items os pwd git newline character
 set -U _tide_right_items status cmd_duration context jobs direnv bun node python rustc java php pulumi ruby go gcloud kubectl distrobox toolbox terraform aws nix_shell crystal elixir zig time
 
+set -l linux_cli_tide_os_icon ''
 if functions -q _tide_detect_os
     _tide_detect_os | read -l --line os_icon os_color os_bg_color
-    set -U tide_os_icon "$os_icon"
-else
-    set -U tide_os_icon ''
+    if test -n "$os_icon"
+        set linux_cli_tide_os_icon "$os_icon"
+    end
 end
+set -U tide_os_icon "$linux_cli_tide_os_icon"
 set -U tide_os_color E4E4E4
 set -U tide_os_bg_color 1C1C1C
 
