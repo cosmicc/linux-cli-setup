@@ -68,6 +68,13 @@ arch_package_available_in_pacman() {
     pacman -Si "$package" >/dev/null 2>&1
 }
 
+arch_package_available_in_yay() {
+    local package="$1"
+
+    command -v yay >/dev/null 2>&1 || return 1
+    run_as_target yay -Si "$package" >/dev/null 2>&1
+}
+
 install_arch_package() {
     local package="$1"
     local required="$2"
@@ -84,6 +91,13 @@ install_arch_package() {
                 return 0
             fi
             warn "Could not install optional Arch package '$package' from pacman."
+            return 0
+        fi
+
+        if arch_package_available_in_yay "$package"; then
+            if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "AUR package $package" run_as_target yay -S --needed --noconfirm "$package"; then
+                record_package_install_rollback "$package"
+            fi
             return 0
         fi
 

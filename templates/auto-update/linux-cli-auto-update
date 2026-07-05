@@ -100,6 +100,8 @@ MODE="${MODE:-notify}"
 PUSHOVER_USER_KEY="${PUSHOVER_USER_KEY:-}"
 PUSHOVER_API_TOKEN="${PUSHOVER_API_TOKEN:-}"
 PUSHOVER_TITLE="${PUSHOVER_TITLE:-Linux Update}"
+AUR_USER="${AUR_USER:-}"
+ENABLE_AUR_UPDATES="${ENABLE_AUR_UPDATES:-1}"
 
 send_pushover() {
     local message="$1"
@@ -142,6 +144,12 @@ update_debian() {
 
 update_arch() {
     run_step "Updating" "pacman packages" pacman -Syu --noconfirm
+
+    if [[ "$ENABLE_AUR_UPDATES" == "1" && -n "$AUR_USER" && -x "$(command -v yay 2>/dev/null || true)" ]]; then
+        run_step "Updating" "AUR packages with yay" runuser -u "$AUR_USER" -- yay -Sua --noconfirm
+    elif [[ "$ENABLE_AUR_UPDATES" == "1" && -x "$(command -v yay 2>/dev/null || true)" ]]; then
+        log "yay is installed, but AUR_USER is not configured; skipping AUR updates."
+    fi
 }
 
 log "Starting unattended update on $(hostname). Log: $LOG_FILE"

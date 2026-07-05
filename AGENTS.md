@@ -4,7 +4,7 @@ This is the first-read guide for agents working in `linux-cli-setup`. Read this 
 
 ## Project Purpose
 
-This project provides root-run Linux setup, refresh, and uninstall scripts for CLI-focused systems. It supports Arch-based systems with `pacman` and Debian/Ubuntu-based systems with `apt`. The default fresh install is the `core` profile; optional profiles add CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, diagnostics, Docker host, and desktop workstation tooling.
+This project provides root-run Linux setup, refresh, and uninstall scripts for CLI-focused systems. It supports Arch-based systems with `pacman` plus `yay` for AUR-backed optional tools, and Debian/Ubuntu-based systems with `apt`. The default fresh install is the `core` profile; optional profiles add CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, diagnostics, Docker host, and desktop workstation tooling.
 
 ## Repository Map
 
@@ -57,14 +57,14 @@ Keep `core` first in install, refresh execution order, and saved state. When `in
 - The target account is the sudoing user from `$SUDO_USER`, not `root`. Root-only direct runs must require `TARGET_USER=username` or saved state.
 - Package-family detection should stay conservative: prefer `pacman` for Arch-based systems and `apt-get` for Debian/Ubuntu-based systems.
 - Install, update, uninstall, and package availability tests must fail clearly on systems without `pacman` or `apt-get`. Install/update/uninstall should run this support check after root/log initialization and before GitHub self-update or managed-file changes.
-- Arch package rows must use packages available through pacman repositories. Do not add AUR-only packages to `data/package-groups.tsv`.
+- Arch installs must ensure `yay` is available before profile packages are installed. Arch package rows may use pacman packages or AUR packages installable through `yay`; keep AUR-only packages in recommended rows unless the user explicitly asks for a required AUR package.
 - Debian/Ubuntu scripts must use noninteractive `apt-get`. Installing `nala` is fine, but scripts must not depend on it.
 - Existing user Fish files must be backed up before replacement unless the installed file already matches the project template.
 - Fish should become the target user's default shell through `/etc/shells` plus `chsh` or `usermod`.
 - Install state belongs in `/var/lib/linux-cli-setup/install.env`; preserve the originally saved shell across updates.
-- Package group contents belong in `data/package-groups.tsv`, not hardcoded shell case blocks. The file uses tab-separated columns for group, tier, Arch packages, Debian/Ubuntu packages, and notes.
+- Package group contents belong in `data/package-groups.tsv`, not hardcoded shell case blocks. The file uses tab-separated columns for group, tier, Arch packages, Debian/Ubuntu packages, and notes. Keep TSV unless the user explicitly asks for a format migration; each distro package column contains space-separated package lists, so TSV avoids CSV quoting and escaping complexity.
 - Script logs belong in `/var/log/linux-cli-setup/`; create one log file per install, update, uninstall, or auto-update execution.
-- `install_test.sh` may run without root and may fall back to a repository-local `logs/` directory when `/var/log/linux-cli-setup/` is not writable. It must not install, update, remove, enable, or disable anything.
+- `install_test.sh` may run without root and may fall back to a repository-local `logs/` directory when `/var/log/linux-cli-setup/` is not writable. It must not install, update, remove, enable, or disable anything. On Arch, it may use installed yay or the read-only AUR RPC to verify optional AUR package names.
 - Package-manager output must stay suppressed by default. Console output should show each item being installed, updated, or uninstalled, with colored status lines unless `--no-color` is passed.
 - Executable script options must use long `--option` names only. Keep `--help` and `--version` on executable scripts.
 - After root detection and log initialization, install and uninstall must check GitHub releases and prereleases for a newer project version before making system changes. The compatibility `update.sh` wrapper delegates to `install.sh`, so it receives the same check there. If a newer version is available, fetch and pull from the trusted `cosmicc/linux-cli-setup` `origin/main`, show Git progress, create a temporary restart wrapper under `/tmp`, and exec the same entrypoint with the original arguments. Keep `LINUX_CLI_SELF_UPDATE_RESTARTED=1` as the loop guard.
@@ -105,7 +105,7 @@ Core always includes OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | not packaged in Debian stable |
 | Time sync / SSH protection / log rotation | `chrony`, `fail2ban`, `logrotate` | `chrony`, `fail2ban`, `logrotate` |
-| Security audit / integrity | `lynis` | `lynis`, `aide` |
+| Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
 | Transfer / throughput | `rsync`, `pv` | `rsync`, `pv` |
 | System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `vnstat`, `bmon` |
 | Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
@@ -114,7 +114,7 @@ Arch-specific core additions are `pacman-contrib`, `reflector`, `pkgfile`, and `
 
 Debian/Ubuntu-specific additions are `apt-file`, `needrestart`, `debian-goodies`, `apt-transport-https`, `unattended-upgrades`, and `nala`.
 
-Do not keep package-map entries for packages that are missing from the selected system's normal package sources. Docker's Debian/Ubuntu official-repository packages are the only exception because the Docker profile adds that repository before installing them.
+Do not keep package-map entries for packages that are missing from the selected system's normal package sources. For Arch, normal sources include pacman and AUR via yay. Docker's Debian/Ubuntu official-repository packages are the only Debian/Ubuntu exception because the Docker profile adds that repository before installing them.
 
 ### Comfort
 
@@ -213,7 +213,7 @@ Install or upgrade `ruff`, `black`, `pytest`, and `pre-commit` through `pipx`.
 
 ### Docker
 
-Docker must be opt-in. On Arch, install `docker`, `docker-compose`, `lazydocker`, `dive`, and `ctop`, enable Docker, and add the target user to the `docker` group.
+Docker must be opt-in. On Arch, install `docker`, `docker-compose`, `lazydocker`, `dive`, `ctop`, and `hadolint`, enable Docker, and add the target user to the `docker` group.
 
 On Debian/Ubuntu, prefer Docker's official apt repository for production-style hosts and install Docker Engine, CLI, containerd, Buildx, and the Compose plugin. Support `LINUX_CLI_DOCKER_APT_SOURCE=distro` for a distro-package fallback with `docker.io` and `docker-compose`. Add Docker Fish aliases, but never run Docker prune or destructive cleanup automatically.
 
@@ -236,7 +236,7 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 - A root `.auto-update.conf` may exist for local testing with real settings, but it must stay ignored by Git. The installed runtime config is still `/etc/linux-cli-setup/auto-update.conf`.
 - The automatic update scheduler should run daily between 3:30 AM and 4:30 AM. Prefer a systemd timer with `OnCalendar=03:30` plus `RandomizedDelaySec=1h`; fall back to `/etc/cron.d/linux-cli-auto-update` when systemd is unavailable.
 - Debian/Ubuntu auto-update uses `apt-get update`, `full-upgrade`, `autoremove`, and `autoclean`.
-- Arch auto-update uses `pacman -Syu --noconfirm`.
+- Arch auto-update uses `pacman -Syu --noconfirm` and may run `yay -Sua --noconfirm` as the configured `AUR_USER` when enabled.
 
 ## Security And Safety
 

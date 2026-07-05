@@ -141,6 +141,7 @@ remove_auto_update_config() {
 
     default_config="$(mktemp)"
     sed \
+        -e "s|^AUR_USER=.*|AUR_USER=\"${TARGET_USER}\"|" \
         -e 's|^PUSHOVER_USER_KEY=.*|PUSHOVER_USER_KEY=""|' \
         -e 's|^PUSHOVER_API_TOKEN=.*|PUSHOVER_API_TOKEN=""|' \
         "$AUTO_UPDATE_TEMPLATE_DIR/auto-update.conf" > "$default_config"

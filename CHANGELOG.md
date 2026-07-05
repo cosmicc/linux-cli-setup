@@ -22,7 +22,8 @@ All notable changes to this project will be documented in this file.
 - Moved fail2ban ownership from the netops profile into core.
 - Changed the Arch archive package mapping from retired `p7zip` to current `7zip`.
 - Changed package mappings so Arch rows use pacman packages and Debian rows use Debian stable package names, except Docker's official apt repository package path.
-- Removed automatic yay/AUR installation and automatic AUR updates from the Arch flow.
+- Restored automatic yay bootstrap and AUR fallback installs for optional Arch packages so the Arch install can be more complete.
+- Restored Arch `aide` and `hadolint` as yay/AUR-backed optional package entries.
 - Clarified `update.sh --help` now that updates are handled through the installer refresh path.
 - Corrected the agent validation commands so Bash and Fish syntax checks cover every listed file.
 

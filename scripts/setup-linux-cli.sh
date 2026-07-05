@@ -128,6 +128,7 @@ main() {
     log "Selected profiles: $(selected_profiles_csv)"
 
     update_package_database_and_system
+    ensure_yay_on_arch
     sync_selected_profiles
     install_jetbrains_nerd_font_from_package_or_release
     enable_openssh_service

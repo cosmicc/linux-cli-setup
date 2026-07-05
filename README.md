@@ -6,7 +6,7 @@ Current unreleased alpha testing version: `0.4a`.
 
 ## Supported Systems
 
-- Arch-based systems with `pacman`.
+- Arch-based systems with `pacman`; the installer bootstraps `yay` before profile packages so AUR-backed optional tools can be installed too.
 - Debian/Ubuntu-based systems with `apt`; scripts use `apt-get` even when `nala` is installed for interactive use.
 
 On systems without `pacman` or `apt-get`, `install.sh`, `update.sh`, and `uninstall.sh` stop before self-update or managed-file changes and report that the system is unsupported.
@@ -38,7 +38,7 @@ sudo ./install.sh --profile docker
 sudo ./install.sh --all-profiles
 ```
 
-Package names are read from [data/package-groups.tsv](data/package-groups.tsv). Edit that file to change which Arch or Debian/Ubuntu packages belong to each group.
+Package names are read from [data/package-groups.tsv](data/package-groups.tsv). Edit that file to change which Arch or Debian/Ubuntu packages belong to each group. The file is tab-separated because each package column contains space-separated package lists; using tabs keeps manual edits and shell parsing simple without CSV quoting rules.
 
 Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
 Performance tuning and hardening are enabled by default. Use `--skip-performance` or `--skip-hardening` when you need to leave those settings untouched for a specific host.
@@ -91,12 +91,12 @@ It also adds common CLI tools:
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | not packaged in Debian stable |
 | Time sync / SSH protection / log rotation | `chrony`, `fail2ban`, `logrotate` | `chrony`, `fail2ban`, `logrotate` |
-| Security audit / integrity | `lynis` | `lynis`, `aide` |
+| Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
 | Transfer / throughput | `rsync`, `pv` | `rsync`, `pv` |
 | System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `vnstat`, `bmon` |
 | Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
 
-Recommended package rows are best-effort, but package names in the profile map are expected to exist in the selected system's normal package sources. Docker's Debian/Ubuntu profile is the exception because the installer can add Docker's official apt repository before installing Docker Engine packages.
+Recommended package rows are best-effort. On Arch, the installer checks pacman first and falls back to yay/AUR for optional tools such as `aide` when needed. Docker's Debian/Ubuntu profile can add Docker's official apt repository before installing Docker Engine packages.
 
 The installer configures UFW with a default deny incoming policy, default allow outgoing policy, and explicit inbound allowances for SSH, iperf3 on port `5201` TCP/UDP, and ICMP echo-request ping. It does not reset pre-existing UFW rules.
 
@@ -111,7 +111,7 @@ Run the diagnostic checker when you want to find package name or repository disc
 ./install_test.sh --profile wireless,netops
 ```
 
-It reads [data/package-groups.tsv](data/package-groups.tsv), checks the current system's package manager, prints every package checked, and exits nonzero if any selected package is unavailable. It does not install or enable anything.
+It reads [data/package-groups.tsv](data/package-groups.tsv), checks the current system's package manager, prints every package checked, and exits nonzero if any selected package is unavailable. On Arch, it checks pacman, installed yay, and the read-only AUR RPC. It does not install or enable anything.
 
 ## Git Defaults
 
@@ -228,7 +228,7 @@ Docker is opt-in only:
 sudo ./install.sh --profile docker
 ```
 
-On Arch, the profile installs `docker`, `docker-compose`, `lazydocker`, `dive`, and `ctop`, then enables Docker and adds the target user to the `docker` group.
+On Arch, the profile installs `docker`, `docker-compose`, `lazydocker`, `dive`, `ctop`, and `hadolint`, then enables Docker and adds the target user to the `docker` group.
 
 On Debian/Ubuntu, the profile uses Docker's official apt repository by default and installs Docker Engine, CLI, containerd, Buildx, and the Compose plugin. To use distro packages instead, the fallback installs Debian's `docker.io` and `docker-compose` packages:
 
