@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Install common CLI tooling, selected profile packages, Fish shell, Fisher/Tide
-# prompt configuration, and a dynamic login MOTD for the user who invoked sudo.
+# Install or refresh common CLI tooling, selected profile packages, Fish shell,
+# Fisher/Tide prompt configuration, and a dynamic login MOTD for the user who
+# invoked sudo.
 
 set -euo pipefail
 
@@ -15,7 +16,7 @@ show_help() {
     cat <<'HELP'
 Usage: sudo ./install.sh [options]
 
-Install the core Linux CLI setup and optional package groups.
+Install or refresh the Linux CLI setup and optional package groups.
 
 Options:
   --profile NAME[,NAME]   Install one or more groups in addition to core.
@@ -32,12 +33,36 @@ Environment:
   LINUX_CLI_KEEP_DEFAULT_MOTD=1        Do not disable existing MOTD snippets.
   LINUX_CLI_DOCKER_APT_SOURCE=distro   Use distro Docker packages instead of Docker's official apt repo.
 
-If no group option is provided and the script is running in an interactive
-terminal, install asks which optional groups to add. Core is always installed.
+If no group option is provided on a new system, only core is installed. If a
+previous linux-cli-setup install is detected, saved profiles are refreshed.
 HELP
 }
 
-install_selected_profiles() {
+select_install_profiles() {
+    local saved_profiles
+
+    if [[ "$PROFILES_EXPLICIT" -eq 1 ]]; then
+        INSTALL_MODE=install
+        return
+    fi
+
+    if install_state_exists; then
+        INSTALL_MODE=update
+        saved_profiles="$(state_profiles)"
+        SELECTED_PROFILES=()
+        add_profile_csv "$saved_profiles"
+        ensure_core_profile_first
+        log "Everything was installed already; running install.sh in update mode for saved profiles: $(selected_profiles_csv)"
+        return
+    fi
+
+    INSTALL_MODE=install
+    SELECTED_PROFILES=()
+    add_profile core
+    log "No existing linux-cli-setup installation detected and no profiles were specified; installing core only."
+}
+
+sync_selected_profiles() {
     local profile
 
     for profile in "${SELECTED_PROFILES[@]}"; do
@@ -53,7 +78,11 @@ install_selected_profiles() {
         fi
 
         if [[ "$profile" == "dev" ]]; then
-            install_dev_tools
+            if [[ "$INSTALL_MODE" == "update" ]]; then
+                update_dev_tools
+            else
+                install_dev_tools
+            fi
         fi
     done
 }
@@ -83,9 +112,13 @@ main() {
     start_transaction
     trap transaction_error_trap ERR
     init_runtime_context
-    PACKAGE_STEP_VERB="Installing"
+    select_install_profiles
+    if [[ "$INSTALL_MODE" == "update" ]]; then
+        PACKAGE_STEP_VERB="Updating"
+    else
+        PACKAGE_STEP_VERB="Installing"
+    fi
     export PACKAGE_STEP_VERB
-    prompt_for_install_profiles
 
     log "Detected package family: $PACKAGE_FAMILY"
     log "Target user: $TARGET_USER"
@@ -93,7 +126,7 @@ main() {
 
     update_package_database_and_system
     ensure_yay_on_arch
-    install_selected_profiles
+    sync_selected_profiles
     install_jetbrains_nerd_font_from_package_or_release
     enable_openssh_service
     configure_ufw_firewall
@@ -114,7 +147,11 @@ main() {
     commit_transaction
     trap - ERR
 
-    log "Setup complete. Open a new login session to see the Fish prompt and MOTD."
+    if [[ "$INSTALL_MODE" == "update" ]]; then
+        log "Update complete."
+    else
+        log "Setup complete. Open a new login session to see the Fish prompt and MOTD."
+    fi
     if profile_is_selected docker; then
         log "Docker group membership takes effect after $TARGET_USER logs out and back in."
     fi

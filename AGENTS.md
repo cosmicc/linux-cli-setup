@@ -4,16 +4,15 @@ This is the first-read guide for agents working in `linux-cli-setup`. Read this 
 
 ## Project Purpose
 
-This project provides root-run Linux setup, update, and uninstall scripts for CLI-focused systems. It supports Arch-based systems with `pacman`/`yay` and Debian/Ubuntu-based systems with `apt`. The default install is the `core` profile; optional profiles add CLI comfort tools, development, network troubleshooting, wireless support, diagnostics, Docker host, and desktop workstation tooling.
+This project provides root-run Linux setup, refresh, and uninstall scripts for CLI-focused systems. It supports Arch-based systems with `pacman`/`yay` and Debian/Ubuntu-based systems with `apt`. The default fresh install is the `core` profile; optional profiles add CLI comfort tools, development, network troubleshooting, wireless support, diagnostics, Docker host, and desktop workstation tooling.
 
 ## Repository Map
 
-- `install.sh`, `update.sh`, and `uninstall.sh` are root entry points. Keep them small wrappers.
+- `install.sh`, `update.sh`, and `uninstall.sh` are root entry points. Keep them small wrappers. `update.sh` is only a compatibility wrapper to `install.sh`.
 - `install_test.sh` is the non-mutating package availability diagnostic entry point.
 - `VERSION` is the project version source. Update it with every release or prerelease.
 - `data/package-groups.tsv` is the editable package group map. Scripts read package names from this file at runtime.
-- `scripts/setup-linux-cli.sh` contains the install flow.
-- `scripts/update-linux-cli.sh` contains the update flow.
+- `scripts/setup-linux-cli.sh` contains the install and saved-profile refresh flow.
 - `scripts/uninstall-linux-cli.sh` contains the uninstall flow.
 - `scripts/install-test-linux-cli.sh` contains the package availability diagnostic flow.
 - `scripts/lib/linux-cli-common.sh` contains shared profile, package, distro, user, Fish, Git, MOTD, Docker, and safety helpers.
@@ -43,11 +42,11 @@ Do not collapse this project into one giant "install everything" profile. Keep `
 | `docker` | Docker host packages, Compose plugin, Docker CLI helpers, and Fish Docker aliases. |
 | `desktop` | GUI workstation clipboard, desktop integration, and notification helpers. |
 
-`install.sh` and `update.sh` always include `core`; optional profiles are selected with `--profile`, `--profiles`, or `--all-profiles`. `uninstall.sh --remove-packages` does not implicitly add `core`, because package removal is destructive.
+`install.sh` always includes `core`; optional profiles are selected with `--profile`, `--profiles`, or `--all-profiles`. `update.sh` is retained only for compatibility and delegates to `install.sh`.
 
-When `install.sh` is run interactively without an explicit profile option, it prompts for `comfort`, `dev`, `netops`, `wireless`, `docker`, and `desktop`; do not prompt for `core`. Keep `diagnostics` available for backward-compatible explicit use with `--profile diagnostics`, but do not include it in the default interactive prompt unless the user asks for it.
+When `install.sh` is run without an explicit profile option and no install state exists, install `core` only. Do not prompt for optional profiles. Keep `diagnostics` available for backward-compatible explicit use with `--profile diagnostics`.
 
-Keep `core` first in install and update execution order and in saved state. `update.sh` should use the profiles saved by install when no explicit profile option is provided, read the current package group map, and install missing packages for those saved profiles. `uninstall.sh --remove-packages` should default to saved optional profiles, skip `core`, and avoid removing packages that belong to retained profiles.
+Keep `core` first in install, refresh execution order, and saved state. When `install.sh` is run without an explicit profile option and install state exists, use the profiles saved by install, read the current package group map, install missing packages for those saved profiles, and log that everything was installed already and `install.sh` is running an update. `uninstall.sh --remove-packages` should default to saved profiles, including `core`, and avoid removing packages that belong to retained profiles only when the user explicitly selects a subset.
 
 ## Installer Contract
 
@@ -64,14 +63,15 @@ Keep `core` first in install and update execution order and in saved state. `upd
 - `install_test.sh` may run without root and may fall back to a repository-local `logs/` directory when `/var/log/linux-cli-setup/` is not writable. It must not install, update, remove, enable, or disable anything.
 - Package-manager output must stay suppressed by default. Console output should show each item being installed, updated, or uninstalled, with colored status lines unless `--no-color` is passed.
 - Executable script options must use long `--option` names only. Keep `--help` and `--version` on executable scripts.
-- After root detection and log initialization, install, update, and uninstall must check GitHub releases and prereleases for a newer project version before making system changes. If a newer version is available, fetch and pull from the trusted `cosmicc/linux-cli-setup` `origin/main`, show Git progress, create a temporary restart wrapper under `/tmp`, and exec the same entrypoint with the original arguments. Keep `LINUX_CLI_SELF_UPDATE_RESTARTED=1` as the loop guard.
+- After root detection and log initialization, install and uninstall must check GitHub releases and prereleases for a newer project version before making system changes. The compatibility `update.sh` wrapper delegates to `install.sh`, so it receives the same check there. If a newer version is available, fetch and pull from the trusted `cosmicc/linux-cli-setup` `origin/main`, show Git progress, create a temporary restart wrapper under `/tmp`, and exec the same entrypoint with the original arguments. Keep `LINUX_CLI_SELF_UPDATE_RESTARTED=1` as the loop guard.
 - Self-update version ordering must support alpha and beta prerelease labels such as `0.1a` and `0.5b`, with final releases such as `v1.0` ranking after prereleases at the same numeric version. Do not auto-update from an unexpected GitHub remote.
 - `--debug` must show captured command output and command details in both console and log files.
 - Required install/update failures must print the error and the last captured output for the failing item, then roll back managed changes from that run. Package-manager system upgrades are not fully reversible; document that limit instead of pretending otherwise.
-- Install and update should configure UFW after OpenSSH is enabled. Preserve existing UFW rules, set default deny incoming/default allow outgoing, allow SSH, allow iperf3 on TCP/UDP `5201`, and keep ICMP echo-request ping allowed.
-- Install and update should apply only basic, non-obtrusive OS hardening. Hardening must be best-effort and must not abort the installer.
-- Install and update should remove unused packages and clean package caches near the end of the run. Cleanup failures should warn and continue.
+- Install and saved-profile refresh should configure UFW after OpenSSH is enabled. Preserve existing UFW rules, set default deny incoming/default allow outgoing, allow SSH, allow iperf3 on TCP/UDP `5201`, and keep ICMP echo-request ping allowed.
+- Install and saved-profile refresh should apply only basic, non-obtrusive OS hardening. Hardening must be best-effort and must not abort the installer.
+- Install and saved-profile refresh should remove unused packages and clean package caches near the end of the run. Cleanup failures should warn and continue.
 - Uninstall must keep going after individual errors and report warnings instead of aborting the whole run.
+- Full package removal must remain behind the explicit `--remove-packages` flag. Exact restoration of package-manager upgrades, firewall state, time settings, service enablement, and packages that predated linux-cli-setup is not guaranteed unless the project has tracked that specific prior state.
 - Do not hardcode secrets, private URLs, credentials, tokens, or environment-specific host names.
 
 ## Package Recommendations
@@ -110,7 +110,7 @@ The `comfort` profile is the optional CLI workflow layer. It should prefer distr
 
 Comfort includes Fish integrations for `atuin`, `zoxide`, `direnv`, and `mise` when those commands exist. Keep Tide as the prompt because the project intentionally uses Fish + Tide to match the screenshot. Do not switch to Starship unless the user explicitly asks.
 
-Managed Fish functions live under `templates/fish/functions/` and are installed into the target user's `~/.config/fish/functions/`. The managed `fish_prompt.fish` must match the reference two-line Tide prompt with OS/current directory on the left, a horizontal frame, context/time on the right, and the prompt character on the second line. Install and update must refresh that prompt after Tide settings are applied so rerunning `install.sh` restores the managed prompt. Managed SSH client defaults live under `templates/ssh/`; install them through an include file under `~/.ssh/conf.d/` and do not overwrite the user's full `~/.ssh/config`.
+Managed Fish functions live under `templates/fish/functions/` and are installed into the target user's `~/.config/fish/functions/`. The managed `fish_prompt.fish` must match the reference two-line Tide prompt with OS/current directory on the left, a horizontal frame, context/time on the right, and the prompt character on the second line. Install and saved-profile refresh must refresh that prompt after Tide settings are applied so rerunning `install.sh` restores the managed prompt. Managed SSH client defaults live under `templates/ssh/`; install them through an include file under `~/.ssh/conf.d/` and do not overwrite the user's full `~/.ssh/config`.
 
 ### Git Defaults
 
@@ -221,9 +221,9 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 Before finishing installer changes, run the practical checks available in the current environment:
 
 ```bash
-bash -n install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/update-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
+bash -n install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
 fish -n templates/fish/config.fish templates/fish/configure_tide.fish templates/fish/conf.d/linux-cli-motd.fish templates/fish/functions/*.fish
-shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/update-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
+shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
 ./install.sh --list-profiles
 ./install.sh --help
 ./install.sh --version

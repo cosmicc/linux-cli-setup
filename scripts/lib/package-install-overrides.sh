@@ -2,7 +2,7 @@
 #
 # Runtime fixes and availability-aware install overrides.
 #
-# This file is sourced after linux-cli-common.sh by install/update/uninstall
+# This file is sourced after linux-cli-common.sh by install/refresh/uninstall
 # entrypoints so functions defined here intentionally replace selected
 # common-library defaults.
 

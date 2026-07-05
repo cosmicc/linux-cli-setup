@@ -1,6 +1,6 @@
 # Linux CLI Setup
 
-Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. The default install is a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, Docker hosting, and desktop helpers are optional package groups.
+Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. A fresh install defaults to a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, Docker hosting, and desktop helpers are optional package groups.
 
 Current unreleased alpha testing version: `0.3a`.
 
@@ -17,7 +17,7 @@ Run from the user account that should receive Fish as the default shell:
 sudo ./install.sh
 ```
 
-In an interactive terminal, install asks whether to add `comfort`, `dev`, `netops`, `wireless`, `docker`, and `desktop`. `core` is always installed and is not prompted. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
+Without profile options, a fresh install installs `core` only. If linux-cli-setup was already installed, `install.sh` uses the saved profiles and refreshes that installation. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
 
 ```bash
 TARGET_USER=myuser ./install.sh
@@ -39,7 +39,7 @@ Package names are read from [data/package-groups.tsv](data/package-groups.tsv). 
 
 Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
 
-Before install, update, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is.
+Before install, saved-profile refresh, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is.
 
 Show the script version:
 
@@ -65,7 +65,7 @@ Available profiles:
 
 ## Core Install
 
-The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt, and a dynamic MOTD. Rerunning install or update refreshes the managed prompt.
+The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt, and a dynamic MOTD. Rerunning install refreshes the managed prompt.
 
 It also adds common CLI tools:
 
@@ -91,7 +91,7 @@ Some recommended packages are installed best-effort because older distro release
 
 The installer configures UFW with a default deny incoming policy, default allow outgoing policy, and explicit inbound allowances for SSH, iperf3 on port `5201` TCP/UDP, and ICMP echo-request ping. It does not reset pre-existing UFW rules.
 
-Install and update also apply a small managed sysctl hardening file, keep `/tmp` and `/var/tmp` sticky, then remove unused packages and clean the package cache. Hardening and cleanup steps are best-effort and continue on failure.
+Install and saved-profile refresh also apply a small managed sysctl hardening file, keep `/tmp` and `/var/tmp` sticky, then remove unused packages and clean the package cache. Hardening and cleanup steps are best-effort and continue on failure.
 
 ## Package Availability Test
 
@@ -217,21 +217,23 @@ Arch systems also get `pacman-contrib`, `reflector`, `pkgfile`, and `base-devel`
 
 Debian/Ubuntu systems also get `apt-file`, `needrestart`, `debian-goodies`, `software-properties-common`, `apt-transport-https`, `unattended-upgrades`, and `nala` where available.
 
-## Update
+## Refresh
 
-Refresh packages, managed Fish config, Fisher plugins, Tide settings, and MOTD:
-
-```bash
-sudo ./update.sh
-```
-
-If no group is given, `update.sh` uses the groups saved by the last install. It reads the current package map and installs any missing packages from those saved groups. You can also specify groups:
+After linux-cli-setup is installed, run `install.sh` again without profile options to refresh packages, managed Fish config, Fisher plugins, Tide settings, and MOTD for the saved profiles:
 
 ```bash
-sudo ./update.sh --profile dev,docker
+sudo ./install.sh
 ```
 
-Install and update runs create a log under `/var/log/linux-cli-setup/`. Package-manager output is hidden by default; the console shows each item being installed or updated. If a required step fails, the scripts show the error plus the last captured output for that item and roll back managed changes from that run. Package-manager system upgrades cannot be fully reversed by any shell script, but project-managed files, shell changes, and packages installed by the current run are rolled back where possible.
+It reads the current package map and installs any missing packages from the saved profiles. You can also specify profiles to add or refresh:
+
+```bash
+sudo ./install.sh --profile dev,docker
+```
+
+`update.sh` remains as a compatibility wrapper to `install.sh`, but new automation should call `install.sh`.
+
+Install and refresh runs create a log under `/var/log/linux-cli-setup/`. Package-manager output is hidden by default; the console shows each item being installed or updated. If a required step fails, the scripts show the error plus the last captured output for that item and roll back managed changes from that run. Package-manager system upgrades cannot be fully reversed by any shell script, but project-managed files, shell changes, and packages installed by the current run are rolled back where possible.
 
 ## Uninstall
 
@@ -241,7 +243,7 @@ Remove linux-cli-setup managed Fish and MOTD files:
 sudo ./uninstall.sh
 ```
 
-The default uninstall preserves installed packages and restores the saved pre-install shell when state is available. Package removal is explicit. Without a `--profile` selection, `--remove-packages` removes the optional groups saved by install, but leaves all `core` packages installed:
+The default uninstall preserves installed packages and restores the saved pre-install shell when state is available. Package removal is explicit because many CLI packages may predate linux-cli-setup or be used by other workflows. Without a `--profile` selection, `--remove-packages` removes packages from all profiles saved by install, including `core`:
 
 ```bash
 sudo ./uninstall.sh --remove-packages
@@ -249,6 +251,8 @@ sudo ./uninstall.sh --remove-packages --profile docker
 ```
 
 Uninstall also logs to `/var/log/linux-cli-setup/`. It keeps going after individual errors and reports each item being removed.
+
+Uninstall removes managed files, restores the saved shell, re-enables disabled MOTD snippets, and removes the default automatic update config. If the automatic update config was edited, uninstall backs it up instead of deleting it because it may contain local Pushover settings. Exact reversal of package-manager upgrades, firewall state, time settings, service enablement, and packages that existed before linux-cli-setup is not guaranteed.
 
 ## Time And NTP
 

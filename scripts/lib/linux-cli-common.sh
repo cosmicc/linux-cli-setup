@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Shared helpers for linux-cli-setup install, update, and uninstall scripts.
+# Shared helpers for linux-cli-setup install, refresh, and uninstall scripts.
 
 set -Eeuo pipefail
 
@@ -26,12 +26,14 @@ EXPECTED_GITHUB_REPO="${LINUX_CLI_SELF_UPDATE_REPO:-cosmicc/linux-cli-setup}"
 SELF_UPDATE_BRANCH="${LINUX_CLI_SELF_UPDATE_BRANCH:-main}"
 
 SUPPORTED_PROFILES=(core comfort dev netops wireless diagnostics docker desktop)
-INSTALL_PROMPT_PROFILES=(comfort dev netops wireless docker desktop)
 COMFORT_FISH_FUNCTIONS=(mkcd extract dnscheck certcheck serve jfu scs)
 WIRELESS_FISH_FUNCTIONS=(wifi-connect wifi-info)
 SELECTED_PROFILES=()
 PROFILES_EXPLICIT=0
 PROFILE_POSITIONAL_ARGS=()
+# INSTALL_MODE is set by setup-linux-cli.sh after this shared library is sourced.
+# shellcheck disable=SC2034
+INSTALL_MODE=install
 DEBUG=0
 USE_COLOR=1
 LOG_FILE=""
@@ -569,6 +571,10 @@ read_state_value() {
     awk -F= -v key="$key" '$1 == key { value = substr($0, index($0, "=") + 1) } END { if (value != "") print value }' "$STATE_FILE"
 }
 
+install_state_exists() {
+    [[ -f "$STATE_FILE" ]]
+}
+
 detect_target_user() {
     local state_user
 
@@ -785,64 +791,6 @@ parse_profile_selection() {
     fi
 
     export PROFILES_EXPLICIT
-}
-
-prompt_text() {
-    local message="$1"
-
-    if [[ "$USE_COLOR" -eq 1 ]]; then
-        printf '%b' "$(color_code cyan)${message}$(color_code reset)"
-    else
-        printf '%s' "$message"
-    fi
-
-    if [[ -n "$LOG_FILE" ]]; then
-        printf '%s\n' "$message" >> "$LOG_FILE"
-    fi
-}
-
-ask_yes_no() {
-    local message="$1"
-    local answer
-
-    while true; do
-        prompt_text "$message [y/N]: "
-        IFS= read -r answer
-        answer="$(trim_string "$answer")"
-
-        case "${answer,,}" in
-            y|yes)
-                [[ -n "$LOG_FILE" ]] && printf '[linux-cli-setup] ANSWER: yes\n' >> "$LOG_FILE"
-                return 0
-                ;;
-            ""|n|no)
-                [[ -n "$LOG_FILE" ]] && printf '[linux-cli-setup] ANSWER: no\n' >> "$LOG_FILE"
-                return 1
-                ;;
-            *)
-                console_line yellow "[linux-cli-setup] Please answer yes or no."
-                ;;
-        esac
-    done
-}
-
-prompt_for_install_profiles() {
-    local profile
-
-    [[ "$PROFILES_EXPLICIT" -eq 0 ]] || return 0
-    add_profile core
-
-    if [[ ! -t 0 ]]; then
-        log "No interactive terminal detected; installing core only. Use --profile or --all-profiles to select optional groups."
-        return 0
-    fi
-
-    log "Core is always installed. Choose optional package groups to add."
-    for profile in "${INSTALL_PROMPT_PROFILES[@]}"; do
-        if ask_yes_no "[linux-cli-setup] Install $profile ($(profile_description "$profile"))?"; then
-            add_profile "$profile"
-        fi
-    done
 }
 
 selected_profiles_csv() {

@@ -18,8 +18,11 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Changed Fish plugin setup to use `zoxide` for directory jumping and added `edc/bass` to the managed Fisher plugin list.
-- Changed the managed Fish prompt template to match the reference two-line Tide prompt and documented that install/update refresh it after Tide configuration.
-- Changed install and update to apply best-effort basic hardening, configure UFW, and clean unused packages plus package caches near the end of each run.
+- Changed the managed Fish prompt template to match the reference two-line Tide prompt and documented that install/refresh runs update it after Tide configuration.
+- Changed `install.sh` so a fresh no-profile run installs core only, while a no-profile run on an existing linux-cli-setup install refreshes the saved profiles.
+- Changed `update.sh` into a compatibility wrapper for `install.sh` and removed the separate update implementation.
+- Changed `uninstall.sh --remove-packages` so saved-profile removal includes `core` by default, and added safe cleanup for the automatic update config.
+- Changed install and saved-profile refresh to apply best-effort basic hardening, configure UFW, and clean unused packages plus package caches near the end of each run.
 
 ## 0.2a - 2026-06-30
 

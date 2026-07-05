@@ -21,10 +21,10 @@ Usage: sudo ./uninstall.sh [options]
 Remove linux-cli-setup managed MOTD and Fish configuration.
 
 Options:
-  --remove-packages       Also remove packages for selected or saved optional groups.
-  --profile NAME[,NAME]   Select optional package groups to remove with --remove-packages.
+  --remove-packages       Also remove packages for selected or saved profiles.
+  --profile NAME[,NAME]   Select package profiles to remove with --remove-packages.
   --profiles NAME[,NAME]  Alias for --profile.
-  --all-profiles          Select every optional group for package removal.
+  --all-profiles          Select every supported profile for package removal.
   --keep-shell            Do not restore the user's pre-install default shell.
   --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
@@ -33,8 +33,8 @@ Options:
   --help                  Show this help.
 
 Default behavior preserves installed packages and restores the saved shell when
-state is available. With --remove-packages, saved optional groups are removed by
-default, but core packages are always left installed.
+state is available. With --remove-packages, saved profiles are removed by
+default, including core.
 HELP
 }
 
@@ -132,6 +132,28 @@ remove_installed_utility_scripts() {
     done < <(find "$UTILITY_SCRIPT_DIR" -maxdepth 1 -type f -print0 | sort -z)
 }
 
+remove_auto_update_config() {
+    local default_config
+
+    if [[ ! -e "$AUTO_UPDATE_CONFIG" && ! -L "$AUTO_UPDATE_CONFIG" ]]; then
+        return
+    fi
+
+    default_config="$(mktemp)"
+    sed \
+        -e "s|^AUR_USER=.*|AUR_USER=\"${TARGET_USER}\"|" \
+        -e 's|^PUSHOVER_USER_KEY=.*|PUSHOVER_USER_KEY=""|' \
+        -e 's|^PUSHOVER_API_TOKEN=.*|PUSHOVER_API_TOKEN=""|' \
+        "$AUTO_UPDATE_TEMPLATE_DIR/auto-update.conf" > "$default_config"
+
+    remove_file_if_managed_or_backup "$AUTO_UPDATE_CONFIG" "$default_config"
+    rm -f "$default_config"
+
+    if [[ -d "$CONFIG_DIR" ]] && [[ -z "$(find "$CONFIG_DIR" -mindepth 1 -print -quit)" ]]; then
+        run_step_optional "Removing directory" "$CONFIG_DIR" rmdir "$CONFIG_DIR"
+    fi
+}
+
 remove_managed_files() {
     local fish_config_dir="$TARGET_HOME/.config/fish"
     local function_template
@@ -167,6 +189,7 @@ remove_managed_files() {
     run_step_optional "Removing file" "/usr/local/bin/ntp-status" rm -f /usr/local/bin/ntp-status
     remove_installed_utility_scripts
     run_step_optional "Removing file" "/usr/local/sbin/linux-cli-auto-update" rm -f /usr/local/sbin/linux-cli-auto-update
+    remove_auto_update_config
     run_step_optional "Removing file" "/etc/update-motd.d/50-linux-cli-setup" rm -f /etc/update-motd.d/50-linux-cli-setup
     run_step_optional "Removing file" "/etc/fish/conf.d/linux-cli-motd.fish" rm -f /etc/fish/conf.d/linux-cli-motd.fish
     run_step_optional "Removing file" "/etc/systemd/system/linux-cli-auto-update.service" rm -f /etc/systemd/system/linux-cli-auto-update.service
@@ -188,6 +211,11 @@ select_package_removal_profiles() {
         return
     fi
 
+    if ! install_state_exists; then
+        log "No install state found; no saved package profiles selected for removal."
+        return
+    fi
+
     profiles="$(state_profiles)"
     SELECTED_PROFILES=()
     add_profile_csv "$profiles"
@@ -197,7 +225,7 @@ remove_selected_profile_packages() {
     local profile
     local state_profile
     local removal_profiles=()
-    local retained_profiles=(core)
+    local retained_profiles=()
     local saved_profiles=()
 
     [[ "$REMOVE_PACKAGES" -eq 1 ]] || return
@@ -206,7 +234,6 @@ remove_selected_profile_packages() {
     mapfile -t saved_profiles < <(profiles_csv_to_lines "$(state_profiles)")
     if [[ "$PROFILES_EXPLICIT" -eq 1 ]]; then
         for state_profile in "${saved_profiles[@]}"; do
-            [[ "$state_profile" == "core" ]] && continue
             if ! profile_is_selected "$state_profile"; then
                 retained_profiles+=("$state_profile")
             fi
@@ -214,15 +241,11 @@ remove_selected_profile_packages() {
     fi
 
     for profile in "${SELECTED_PROFILES[@]}"; do
-        if [[ "$profile" == "core" ]]; then
-            log "Leaving core packages installed."
-            continue
-        fi
         removal_profiles+=("$profile")
     done
 
     if [[ "${#removal_profiles[@]}" -eq 0 ]]; then
-        log "No optional package groups selected for removal."
+        log "No package profiles selected for removal."
         return
     fi
 
