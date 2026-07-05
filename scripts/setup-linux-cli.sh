@@ -34,6 +34,7 @@ Environment:
   TARGET_USER=username                 Use when running directly as root.
   LINUX_CLI_KEEP_DEFAULT_MOTD=1        Do not disable existing MOTD snippets.
   LINUX_CLI_DOCKER_APT_SOURCE=distro   Use distro Docker packages instead of Docker's official apt repo.
+  LINUX_CLI_ENABLE_CARGO_FALLBACKS=0   Skip cargo source-build fallbacks for comfort tools.
 
 If no group option is provided on a new system, only core is installed. If a
 previous linux-cli-setup install is detected, saved profiles are refreshed.

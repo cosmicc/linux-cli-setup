@@ -122,9 +122,9 @@ install_cargo_tool_if_missing() {
         return 0
     fi
 
-    if [[ "${LINUX_CLI_ENABLE_CARGO_FALLBACKS:-0}" != "1" ]]; then
+    if [[ "${LINUX_CLI_ENABLE_CARGO_FALLBACKS:-1}" == "0" ]]; then
         if [[ "$CARGO_FALLBACKS_NOTICE_SHOWN" -eq 0 ]]; then
-            warn "Skipping cargo source-build fallbacks for missing comfort tools. Set LINUX_CLI_ENABLE_CARGO_FALLBACKS=1 to enable them."
+            warn "Skipping cargo source-build fallbacks for missing comfort tools because LINUX_CLI_ENABLE_CARGO_FALLBACKS=0."
             CARGO_FALLBACKS_NOTICE_SHOWN=1
         fi
         debug "Skipping cargo fallback for $command_name ($crate_name)."

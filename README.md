@@ -134,7 +134,7 @@ If `delta` is available, it is configured as the pager and interactive diff filt
 
 Installs CLI workflow helpers such as `atuin`, `zoxide`, `direnv`, `mise`, `just`, `watchexec`, `hyperfine`, `trash-cli`, `httpie`, `miller`, `ripgrep-all`, `yazi`, `zellij`, `lazygit`, `difftastic`, `shellcheck`, `shfmt`, `gitleaks`, `age`, `sops`, `chezmoi`, and `etckeeper` where available.
 
-The installer uses distro packages first. If selected tools are missing and `cargo` or `pipx` is available, it attempts user-level fallback installs for common Rust/Python tools. It keeps Tide as the Fish prompt and adds Fish functions for `mkcd`, `extract`, `dnscheck`, `certcheck`, `serve`, `jfu`, and `scs`.
+The installer uses distro packages first. If selected tools are missing and `cargo` or `pipx` is available, it attempts user-level fallback installs for common Rust/Python tools. Cargo source-build fallbacks are enabled by default; set `LINUX_CLI_ENABLE_CARGO_FALLBACKS=0` to skip them. It keeps Tide as the Fish prompt and adds Fish functions for `mkcd`, `extract`, `dnscheck`, `certcheck`, `serve`, `jfu`, and `scs`.
 
 The installer also creates a managed SSH include file at `~/.ssh/conf.d/00-defaults.conf` and adds `Include ~/.ssh/conf.d/*.conf` to `~/.ssh/config` when needed. It does not overwrite the user's full SSH config.
 
