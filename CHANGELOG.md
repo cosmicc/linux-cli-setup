@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Fixed the managed Tide prompt to enable the reference Git, job, environment, language/toolchain, cloud, Kubernetes, container, and time items instead of only path, command duration, context, and time.
 - Fixed install, update, uninstall, and package availability tests to fail clearly on systems without `pacman` or `apt-get`, before self-update or managed-file changes.
 - Fixed the managed Tide prompt shape so the left OS/path block and right context/time block use rounded segment caps, dark backgrounds, and visible internal dividers.
 - Fixed the managed Tide right prompt so the command-duration segment appears before context/time after long-running commands.
