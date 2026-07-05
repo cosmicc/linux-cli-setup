@@ -118,7 +118,7 @@ Do not keep package-map entries for packages that are missing from the selected 
 
 ### Comfort
 
-The `comfort` profile is the optional CLI workflow layer. It should prefer distro packages from `data/package-groups.yaml`, then attempt user-level cargo or pipx fallback installs only for missing tools where a known package/crate mapping exists. Cargo source-build fallbacks are enabled by default and may be skipped with `LINUX_CLI_ENABLE_CARGO_FALLBACKS=0`. For cargo tools whose current crates require a newer Rust compiler than a supported distro commonly ships, pin a tested compatible crate version instead of repeatedly failing on MSRV errors. Keep fallback installs best-effort and non-system-wide.
+The `comfort` profile is the optional CLI workflow layer. It should prefer distro packages from `data/package-groups.yaml`, then attempt user-level cargo or pipx fallback installs only for missing tools where a known package/crate mapping exists. Cargo source-build fallbacks are enabled by default and may be skipped with `LINUX_CLI_ENABLE_CARGO_FALLBACKS=0`. Debian/Ubuntu comfort installs must include source-build prerequisites such as `build-essential`, `pkg-config`, and `libssl-dev` before cargo fallbacks run. For cargo tools whose current crates require a newer Rust compiler than a supported distro commonly ships, pin a tested compatible crate version instead of repeatedly failing on MSRV errors. Keep fallback installs best-effort and non-system-wide.
 
 Comfort includes Fish integrations for `atuin`, `zoxide`, `direnv`, and `mise` when those commands exist. Keep Tide as the prompt because the project intentionally uses Fish + Tide to match the screenshot. Do not switch to Starship unless the user explicitly asks.
 

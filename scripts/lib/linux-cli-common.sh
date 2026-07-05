@@ -129,11 +129,11 @@ init_logging() {
 init_logging_with_user_fallback() {
     local action="$1"
     local fallback_log_dir="$PROJECT_ROOT/logs"
+    local preferred_log_file="$LOG_DIR/${action}-${TIMESTAMP}.log"
 
-    if install -m 0755 -d "$LOG_DIR" >/dev/null 2>&1; then
-        LOG_FILE="$LOG_DIR/${action}-${TIMESTAMP}.log"
-        touch "$LOG_FILE"
-        chmod 0644 "$LOG_FILE"
+    if install -m 0755 -d "$LOG_DIR" >/dev/null 2>&1 && touch "$preferred_log_file" >/dev/null 2>&1; then
+        LOG_FILE="$preferred_log_file"
+        chmod 0644 "$LOG_FILE" 2>/dev/null || true
     else
         mkdir -p "$fallback_log_dir"
         LOG_FILE="$fallback_log_dir/${action}-${TIMESTAMP}.log"

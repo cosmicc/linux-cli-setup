@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 - Changed the Docker status utility name from `docker-status` to `dockercheck`.
 - Enabled cargo source-build fallbacks by default for missing comfort tools; set `LINUX_CLI_ENABLE_CARGO_FALLBACKS=0` to opt out.
 - Changed cargo fallback installs to pin compatible `mise` and `watchexec-cli` versions when the target Rust compiler is older than newer crate releases require.
+- Added Debian/Ubuntu comfort source-build prerequisites so cargo fallbacks can compile crates that need OpenSSL headers.
 - Removed OpenVPN, WireGuard, SNMP tooling, and duplicate `rsync` entries from the netops profile; `rsync` remains in core.
 - Moved fail2ban ownership from the netops profile into core.
 - Changed the Arch archive package mapping from retired `p7zip` to current `7zip`.
@@ -36,6 +37,10 @@ All notable changes to this project will be documented in this file.
 - Restored Arch `aide` and `hadolint` as yay/AUR-backed optional package entries.
 - Clarified `update.sh --help` now that updates are handled through the installer refresh path.
 - Corrected the agent validation commands so Bash and Fish syntax checks cover every listed file.
+
+### Fixed
+
+- Fixed `install_test.sh` logging fallback when `/var/log/linux-cli-setup` exists but is not writable by the current user.
 
 ## 0.3a - 07.05.2026
 

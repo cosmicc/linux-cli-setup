@@ -180,10 +180,13 @@ package_groups:
       - gitleaks
       - age
       - etckeeper
+      - build-essential
+      - pkg-config
+      - libssl-dev
       - cargo
       - pipx
       - python3-venv
-    notes: "CLI comfort tools; missing commands are handled best-effort with user-level cargo or pipx fallbacks when available."
+    notes: "CLI comfort tools; Debian includes source-build prerequisites for cargo fallbacks, and missing commands are handled best-effort with user-level cargo or pipx fallbacks when available."
 
   - group: dev
     tier: recommended
