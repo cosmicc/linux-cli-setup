@@ -11,13 +11,13 @@ This project provides root-run Linux setup, refresh, and uninstall scripts for C
 - `install.sh`, `update.sh`, and `uninstall.sh` are root entry points. Keep them small wrappers. `update.sh` is only a compatibility wrapper to `install.sh`.
 - `install_test.sh` is the non-mutating package availability diagnostic entry point.
 - `VERSION` is the project version source. Update it with every release or prerelease.
-- `data/package-groups.tsv` is the editable package group map. Scripts read package names from this file at runtime.
+- `data/package-groups.yaml` is the editable package group map. Scripts read package names from this file at runtime.
 - `scripts/setup-linux-cli.sh` contains the install and saved-profile refresh flow.
 - `scripts/uninstall-linux-cli.sh` contains the uninstall flow.
 - `scripts/install-test-linux-cli.sh` contains the package availability diagnostic flow.
 - `scripts/lib/linux-cli-common.sh` contains shared profile, package, distro, user, Fish, Git, MOTD, Docker, and safety helpers.
 - `scripts/lib/package-install-overrides.sh` contains runtime install overrides for availability-aware package installs and installed utility commands.
-- `scripts/utilities/` contains managed utility commands copied to `/usr/local/bin`, including `aliases` for printing Fish abbreviations and aliases.
+- `scripts/utilities/` contains managed utility commands copied to `/usr/local/bin`, including `aliases` for printing Fish abbreviations and aliases, `timecheck` for chrony/NTP status, and `dockercheck` for Docker host status.
 - `templates/fish/` contains Fish, Fisher, Tide, abbreviation, and fallback MOTD hook templates.
 - `templates/sysctl/` contains managed sysctl hardening and performance templates.
 - `templates/ssh/sshd_config.d/` contains managed OpenSSH daemon hardening snippets.
@@ -62,7 +62,7 @@ Keep `core` first in install, refresh execution order, and saved state. When `in
 - Existing user Fish files must be backed up before replacement unless the installed file already matches the project template.
 - Fish should become the target user's default shell through `/etc/shells` plus `chsh` or `usermod`.
 - Install state belongs in `/var/lib/linux-cli-setup/install.env`; preserve the originally saved shell across updates.
-- Package group contents belong in `data/package-groups.tsv`, not hardcoded shell case blocks. The file uses tab-separated columns for group, tier, Arch packages, Debian/Ubuntu packages, and notes. Keep TSV unless the user explicitly asks for a format migration; each distro package column contains space-separated package lists, so TSV avoids CSV quoting and escaping complexity.
+- Package group contents belong in `data/package-groups.yaml`, not hardcoded shell case blocks. Keep the YAML structure simple: one item per group/tier row, distro-specific package names as one-per-line lists under `arch` and `debian_ubuntu`, and short single-line notes.
 - Script logs belong in `/var/log/linux-cli-setup/`; create one log file per install, update, uninstall, or auto-update execution.
 - `install_test.sh` may run without root and may fall back to a repository-local `logs/` directory when `/var/log/linux-cli-setup/` is not writable. It must not install, update, remove, enable, or disable anything. On Arch, it may use installed yay or the read-only AUR RPC to verify optional AUR package names.
 - Package-manager output must stay suppressed by default. Console output should show each item being installed, updated, or uninstalled, with colored status lines unless `--no-color` is passed.
@@ -82,7 +82,7 @@ Keep `core` first in install, refresh execution order, and saved state. When `in
 
 ## Package Recommendations
 
-Keep these package mappings aligned with `data/package-groups.tsv`. The TSV file is authoritative for script behavior; these tables are explanatory documentation.
+Keep these package mappings aligned with `data/package-groups.yaml`. The YAML file is authoritative for script behavior; these tables are explanatory documentation.
 
 ### Core
 
@@ -118,7 +118,7 @@ Do not keep package-map entries for packages that are missing from the selected 
 
 ### Comfort
 
-The `comfort` profile is the optional CLI workflow layer. It should prefer distro packages from `data/package-groups.tsv`, then attempt user-level cargo or pipx fallback installs only for missing tools where a known package/crate mapping exists. Keep fallback installs best-effort and non-system-wide.
+The `comfort` profile is the optional CLI workflow layer. It should prefer distro packages from `data/package-groups.yaml`, then attempt user-level cargo or pipx fallback installs only for missing tools where a known package/crate mapping exists. Keep fallback installs best-effort and non-system-wide.
 
 Comfort includes Fish integrations for `atuin`, `zoxide`, `direnv`, and `mise` when those commands exist. Keep Tide as the prompt because the project intentionally uses Fish + Tide to match the screenshot. Do not switch to Starship unless the user explicitly asks.
 
@@ -230,10 +230,10 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 - The hardening section also installs managed sysctl protections, conservative OpenSSH daemon guardrails, and Debian apt settings that reject unauthenticated or insecure repositories.
 - The performance tuning section installs managed sysctl tuning for file watchers, file handles, cache pressure, dirty page writeback, service backlog, and MTU probing, and enables `fstrim.timer` when available.
 - Install `time-status` and `ntp-status` into `/usr/local/bin`.
-- Install regular files from `scripts/utilities/` into `/usr/local/bin` as root-owned executable utility commands. Uninstall should remove matching managed utility commands by comparing them against the repository copies and should back up changed local files instead of deleting them. The `aliases` utility must print all Fish abbreviations and aliases visible to the current user.
-- Install `/usr/local/sbin/linux-cli-auto-update` and `/etc/linux-cli-setup/auto-update.conf`.
+- Install regular files from `scripts/utilities/` into `/usr/local/bin` as root-owned executable utility commands. Uninstall should remove matching managed utility commands by comparing them against the repository copies and should back up changed local files instead of deleting them. The `aliases` utility must print all Fish abbreviations and aliases visible to the current user. The `timecheck` utility must show chrony/NTP status, selected time source, and stratum; install `/usr/local/bin/ntpcheck` as a managed alias symlink to `timecheck`. The Docker utility is named `dockercheck`.
+- Install `/usr/local/bin/auto-update` and `/etc/auto-update.conf`. Install/refresh should migrate managed legacy paths from `/usr/local/sbin/linux-cli-auto-update` and `/etc/linux-cli-setup/auto-update.conf`.
 - Never commit real Pushover keys. The config template must contain placeholders only and the installed config must be root-only mode `0600`.
-- A root `.auto-update.conf` may exist for local testing with real settings, but it must stay ignored by Git. The installed runtime config is still `/etc/linux-cli-setup/auto-update.conf`.
+- A root `.auto-update.conf` may exist for local testing with real settings, but it must stay ignored by Git. The installed runtime config is `/etc/auto-update.conf`.
 - The automatic update scheduler should run daily between 3:30 AM and 4:30 AM. Prefer a systemd timer with `OnCalendar=03:30` plus `RandomizedDelaySec=1h`; fall back to `/etc/cron.d/linux-cli-auto-update` when systemd is unavailable.
 - Debian/Ubuntu auto-update uses `apt-get update`, `full-upgrade`, `autoremove`, and `autoclean`.
 - Arch auto-update uses `pacman -Syu --noconfirm` and may run `yay -Sua --noconfirm` as the configured `AUR_USER` when enabled.
@@ -255,9 +255,9 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 Before finishing installer changes, run the practical checks available in the current environment:
 
 ```bash
-for file in install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook; do bash -n "$file"; done
+for file in install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook; do bash -n "$file"; done
 for file in templates/fish/config.fish templates/fish/configure_tide.fish templates/fish/conf.d/linux-cli-motd.fish templates/fish/functions/*.fish; do fish -n "$file"; done
-shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook
+shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook
 ./install.sh --list-profiles
 ./install.sh --help
 ./install.sh --version

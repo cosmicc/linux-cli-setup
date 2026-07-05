@@ -19,11 +19,14 @@ LOGROTATE_TEMPLATE_DIR="$PROJECT_ROOT/templates/logrotate"
 BIN_TEMPLATE_DIR="$PROJECT_ROOT/templates/bin"
 SYSTEMD_TEMPLATE_DIR="$PROJECT_ROOT/templates/systemd"
 CRON_TEMPLATE_DIR="$PROJECT_ROOT/templates/cron"
-PACKAGE_GROUPS_FILE="$PROJECT_ROOT/data/package-groups.tsv"
+PACKAGE_GROUPS_FILE="$PROJECT_ROOT/data/package-groups.yaml"
 STATE_DIR="/var/lib/linux-cli-setup"
 STATE_FILE="$STATE_DIR/install.env"
 CONFIG_DIR="/etc/linux-cli-setup"
-AUTO_UPDATE_CONFIG="/etc/linux-cli-setup/auto-update.conf"
+AUTO_UPDATE_CONFIG="/etc/auto-update.conf"
+LEGACY_AUTO_UPDATE_CONFIG="/etc/linux-cli-setup/auto-update.conf"
+AUTO_UPDATE_COMMAND="/usr/local/bin/auto-update"
+LEGACY_AUTO_UPDATE_COMMAND="/usr/local/sbin/linux-cli-auto-update"
 LOG_DIR="/var/log/linux-cli-setup"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 EXPECTED_GITHUB_REPO="${LINUX_CLI_SELF_UPDATE_REPO:-cosmicc/linux-cli-setup}"
@@ -906,6 +909,30 @@ install_owned_file() {
     run_step "Installing file" "$destination" install -o "$owner" -g "$group" -m "$mode" "$source" "$destination"
 }
 
+install_owned_symlink() {
+    local target="$1"
+    local destination="$2"
+    local owner="$3"
+    local group="$4"
+
+    run_step "Creating directory" "$(dirname "$destination")" mkdir -p "$(dirname "$destination")"
+
+    if [[ -L "$destination" && "$(readlink "$destination")" == "$target" ]]; then
+        run_step "Refreshing symlink" "$destination" ln -sfn "$target" "$destination"
+        run_step_optional "Setting symlink ownership" "$destination" chown -h "$owner:$group" "$destination" || true
+        return
+    fi
+
+    if [[ -e "$destination" || -L "$destination" ]]; then
+        backup_existing_path "$destination"
+    else
+        record_rollback_cmd "rm -f $(shell_quote "$destination")"
+    fi
+
+    run_step "Installing symlink" "$destination" ln -sfn "$target" "$destination"
+    run_step_optional "Setting symlink ownership" "$destination" chown -h "$owner:$group" "$destination" || true
+}
+
 append_shell_if_missing() {
     local shell_path="$1"
 
@@ -937,41 +964,92 @@ packages_for_profile_tier() {
     local family="$1"
     local profile="$2"
     local requested_tier="$3"
-    local group
-    local tier
-    local arch_packages
-    local debian_packages
-    local _notes
-    local packages
-    local package
 
     [[ -f "$PACKAGE_GROUPS_FILE" ]] || die "Package group file not found: $PACKAGE_GROUPS_FILE"
 
-    while IFS=$'\t' read -r group tier arch_packages debian_packages _notes || [[ -n "${group:-}" ]]; do
-        group="$(trim_string "${group:-}")"
-        [[ -z "$group" || "${group:0:1}" == "#" ]] && continue
+    case "$family" in
+        arch|debian)
+            ;;
+        *)
+            die "Unsupported package family: $family"
+            ;;
+    esac
 
-        tier="$(trim_string "${tier:-}")"
-        [[ "$group" == "$profile" ]] || continue
-        package_tier_matches "$tier" "$requested_tier" || continue
+    awk \
+        -v wanted_family="$family" \
+        -v wanted_group="$profile" \
+        -v wanted_tier="$requested_tier" '
+        function trim(value) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            return value
+        }
 
-        case "$family" in
-            arch)
-                packages="$(trim_string "${arch_packages:-}")"
-                ;;
-            debian)
-                packages="$(trim_string "${debian_packages:-}")"
-                ;;
-            *)
-                die "Unsupported package family: $family"
-                ;;
-        esac
+        function unquote(value) {
+            value = trim(value)
+            if (substr(value, 1, 1) == "\"" && substr(value, length(value), 1) == "\"") {
+                value = substr(value, 2, length(value) - 2)
+            }
+            return value
+        }
 
-        [[ -n "$packages" && "$packages" != "-" ]] || continue
-        for package in $packages; do
-            printf '%s\n' "$package"
-        done
-    done < "$PACKAGE_GROUPS_FILE" | awk '!seen[$0]++'
+        function tier_matches(value) {
+            if (wanted_tier == "all") {
+                return value == "required" || value == "recommended" || value == "required_distro" || value == "recommended_distro"
+            }
+            return value == wanted_tier
+        }
+
+        /^[[:space:]]*#/ || /^[[:space:]]*$/ {
+            next
+        }
+
+        /^  - group:[[:space:]]*/ {
+            group = $0
+            sub(/^  - group:[[:space:]]*/, "", group)
+            group = unquote(group)
+            tier = ""
+            section = ""
+            next
+        }
+
+        /^    tier:[[:space:]]*/ {
+            tier = $0
+            sub(/^    tier:[[:space:]]*/, "", tier)
+            tier = unquote(tier)
+            section = ""
+            next
+        }
+
+        /^    arch:[[:space:]]*/ {
+            section = "arch"
+            next
+        }
+
+        /^    debian_ubuntu:[[:space:]]*/ {
+            section = "debian_ubuntu"
+            next
+        }
+
+        /^    notes:[[:space:]]*/ {
+            section = ""
+            next
+        }
+
+        /^      -[[:space:]]*/ {
+            package = $0
+            sub(/^      -[[:space:]]*/, "", package)
+            package = unquote(package)
+            if (package == "" || package == "-") {
+                next
+            }
+            if (group != wanted_group || !tier_matches(tier)) {
+                next
+            }
+            if ((wanted_family == "arch" && section == "arch") || (wanted_family == "debian" && section == "debian_ubuntu")) {
+                print package
+            }
+        }
+    ' "$PACKAGE_GROUPS_FILE" | awk '!seen[$0]++'
 }
 
 required_packages_for_profile() {
@@ -2194,10 +2272,9 @@ configure_logrotate() {
 install_auto_update_config() {
     local config_tmp
 
-    run_step "Creating directory" "$CONFIG_DIR" install -m 0700 -d "$CONFIG_DIR"
-
     if [[ -f "$AUTO_UPDATE_CONFIG" ]]; then
         run_step "Securing file" "$AUTO_UPDATE_CONFIG" chmod 0600 "$AUTO_UPDATE_CONFIG"
+        remove_legacy_auto_update_config
         return
     fi
 
@@ -2208,8 +2285,49 @@ install_auto_update_config() {
         -e "s|^PUSHOVER_API_TOKEN=.*|PUSHOVER_API_TOKEN=\"${PUSHOVER_API_TOKEN:-}\"|" \
         "$AUTO_UPDATE_TEMPLATE_DIR/auto-update.conf" > "$config_tmp"
 
-    install_owned_file "$config_tmp" "$AUTO_UPDATE_CONFIG" 0600 root root
+    if [[ -f "$LEGACY_AUTO_UPDATE_CONFIG" ]]; then
+        install_owned_file "$LEGACY_AUTO_UPDATE_CONFIG" "$AUTO_UPDATE_CONFIG" 0600 root root
+    else
+        install_owned_file "$config_tmp" "$AUTO_UPDATE_CONFIG" 0600 root root
+    fi
+
     rm -f "$config_tmp"
+    remove_legacy_auto_update_config
+}
+
+remove_legacy_auto_update_config() {
+    local default_config
+
+    if [[ ! -e "$LEGACY_AUTO_UPDATE_CONFIG" && ! -L "$LEGACY_AUTO_UPDATE_CONFIG" ]]; then
+        return
+    fi
+
+    default_config="$(mktemp)"
+    sed \
+        -e "s|^AUR_USER=.*|AUR_USER=\"${TARGET_USER}\"|" \
+        -e "s|^PUSHOVER_USER_KEY=.*|PUSHOVER_USER_KEY=\"${PUSHOVER_USER_KEY:-}\"|" \
+        -e "s|^PUSHOVER_API_TOKEN=.*|PUSHOVER_API_TOKEN=\"${PUSHOVER_API_TOKEN:-}\"|" \
+        "$AUTO_UPDATE_TEMPLATE_DIR/auto-update.conf" > "$default_config"
+
+    remove_file_if_managed_or_backup "$LEGACY_AUTO_UPDATE_CONFIG" "$default_config"
+    rm -f "$default_config"
+
+    if [[ -d "$CONFIG_DIR" ]] && [[ -z "$(find "$CONFIG_DIR" -mindepth 1 -print -quit)" ]]; then
+        run_step_optional "Removing directory" "$CONFIG_DIR" rmdir "$CONFIG_DIR"
+    fi
+}
+
+remove_legacy_auto_update_command() {
+    if [[ ! -e "$LEGACY_AUTO_UPDATE_COMMAND" && ! -L "$LEGACY_AUTO_UPDATE_COMMAND" ]]; then
+        return
+    fi
+
+    if [[ -f "$LEGACY_AUTO_UPDATE_COMMAND" ]] && grep -Fq '/etc/linux-cli-setup/auto-update.conf' "$LEGACY_AUTO_UPDATE_COMMAND"; then
+        run_step_optional "Removing legacy file" "$LEGACY_AUTO_UPDATE_COMMAND" rm -f "$LEGACY_AUTO_UPDATE_COMMAND"
+        return
+    fi
+
+    backup_existing_path "$LEGACY_AUTO_UPDATE_COMMAND"
 }
 
 install_cron_fallback_if_needed() {
@@ -2235,7 +2353,8 @@ install_cron_fallback_if_needed() {
 
 install_auto_update_service() {
     install_auto_update_config
-    install_owned_file "$AUTO_UPDATE_TEMPLATE_DIR/linux-cli-auto-update" /usr/local/sbin/linux-cli-auto-update 0755 root root
+    install_owned_file "$AUTO_UPDATE_TEMPLATE_DIR/auto-update" "$AUTO_UPDATE_COMMAND" 0755 root root
+    remove_legacy_auto_update_command
 
     if systemd_available; then
         install_owned_file "$SYSTEMD_TEMPLATE_DIR/linux-cli-auto-update.service" /etc/systemd/system/linux-cli-auto-update.service 0644 root root

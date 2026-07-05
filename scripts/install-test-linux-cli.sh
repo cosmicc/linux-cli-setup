@@ -25,7 +25,7 @@ Options:
   --version               Show version.
   --help                  Show this help.
 
-The script reads data/package-groups.tsv and does not install, update, remove,
+The script reads data/package-groups.yaml and does not install, update, remove,
 or enable anything.
 HELP
 }

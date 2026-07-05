@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
 # Automatic update + reboot notification/reboot script for Debian/Ubuntu and
-# Arch-based hosts. Secrets are read from /etc/linux-cli-setup/auto-update.conf.
+# Arch-based hosts. Secrets are read from /etc/auto-update.conf.
 
 set -euo pipefail
 
-CONFIG_FILE="/etc/linux-cli-setup/auto-update.conf"
+CONFIG_FILE="/etc/auto-update.conf"
 LOG_DIR="/var/log/linux-cli-setup"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 LOG_FILE="$LOG_DIR/auto-update-${TIMESTAMP}.log"
@@ -19,15 +19,15 @@ while [[ $# -gt 0 ]]; do
             DEBUG=1
             ;;
         --version)
-            echo "linux-cli-auto-update $VERSION"
+            echo "auto-update $VERSION"
             exit 0
             ;;
         --help)
             cat <<'HELP'
-Usage: linux-cli-auto-update [--debug] [--version] [--help]
+Usage: auto-update [--debug] [--version] [--help]
 
 Run unattended Debian/Ubuntu or Arch system updates using settings from
-/etc/linux-cli-setup/auto-update.conf.
+/etc/auto-update.conf.
 HELP
             exit 0
             ;;
@@ -44,7 +44,7 @@ touch "$LOG_FILE"
 chmod 0644 "$LOG_FILE"
 
 log() {
-    local message="[linux-cli-auto-update] $*"
+    local message="[auto-update] $*"
     echo "$message"
     echo "$message" >> "$LOG_FILE"
 }

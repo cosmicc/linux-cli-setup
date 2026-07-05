@@ -4,4 +4,4 @@ Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/linux-cli-auto-update
+ExecStart=/usr/local/bin/auto-update

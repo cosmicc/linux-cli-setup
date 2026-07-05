@@ -15,10 +15,14 @@ All notable changes to this project will be documented in this file.
 - Added default performance tuning with a managed sysctl profile and `fstrim.timer` enablement when available.
 - Added an explicit default hardening section with managed sysctl protections, OpenSSH daemon guardrails, and Debian apt repository safety settings.
 - Added `--skip-performance` and `--skip-hardening` options for hosts that need to avoid those managed changes.
+- Added a `timecheck` utility with an `ntpcheck` alias for chrony/NTP status, selected time source, and stratum details.
 
 ### Changed
 
 - Changed time synchronization from systemd-timesyncd to chrony and disabled the previous timesyncd service during install or refresh.
+- Changed the package group source from tab-delimited `data/package-groups.tsv` to editable `data/package-groups.yaml`.
+- Changed the installed auto-update command to `/usr/local/bin/auto-update` and the runtime config to `/etc/auto-update.conf`, with cleanup for the previous managed paths.
+- Changed the Docker status utility name from `docker-status` to `dockercheck`.
 - Moved fail2ban ownership from the netops profile into core.
 - Changed the Arch archive package mapping from retired `p7zip` to current `7zip`.
 - Changed package mappings so Arch rows use pacman packages and Debian rows use Debian stable package names, except Docker's official apt repository package path.

@@ -124,18 +124,26 @@ remove_installed_utility_scripts() {
 
     [[ -d "$UTILITY_SCRIPT_DIR" ]] || return
 
+    if [[ -L /usr/local/bin/ntpcheck && "$(readlink /usr/local/bin/ntpcheck)" == "timecheck" ]]; then
+        run_step_optional "Removing file" "/usr/local/bin/ntpcheck" rm -f /usr/local/bin/ntpcheck
+    else
+        remove_file_if_managed_or_backup /usr/local/bin/ntpcheck "$UTILITY_SCRIPT_DIR/timecheck"
+    fi
+
     while IFS= read -r -d '' script_file; do
         script_name="$(basename "$script_file")"
         [[ -n "$script_name" ]] || continue
         [[ "${script_name:0:1}" != "." ]] || continue
         remove_file_if_managed_or_backup "/usr/local/bin/$script_name" "$script_file"
     done < <(find "$UTILITY_SCRIPT_DIR" -maxdepth 1 -type f -print0 | sort -z)
+
+    remove_file_if_managed_or_backup /usr/local/bin/docker-status "$UTILITY_SCRIPT_DIR/dockercheck"
 }
 
 remove_auto_update_config() {
     local default_config
 
-    if [[ ! -e "$AUTO_UPDATE_CONFIG" && ! -L "$AUTO_UPDATE_CONFIG" ]]; then
+    if [[ ! -e "$AUTO_UPDATE_CONFIG" && ! -L "$AUTO_UPDATE_CONFIG" && ! -e "$LEGACY_AUTO_UPDATE_CONFIG" && ! -L "$LEGACY_AUTO_UPDATE_CONFIG" ]]; then
         return
     fi
 
@@ -147,6 +155,7 @@ remove_auto_update_config() {
         "$AUTO_UPDATE_TEMPLATE_DIR/auto-update.conf" > "$default_config"
 
     remove_file_if_managed_or_backup "$AUTO_UPDATE_CONFIG" "$default_config"
+    remove_file_if_managed_or_backup "$LEGACY_AUTO_UPDATE_CONFIG" "$default_config"
     rm -f "$default_config"
 
     if [[ -d "$CONFIG_DIR" ]] && [[ -z "$(find "$CONFIG_DIR" -mindepth 1 -print -quit)" ]]; then
@@ -192,7 +201,8 @@ remove_managed_files() {
     run_step_optional "Removing file" "/usr/local/bin/time-status" rm -f /usr/local/bin/time-status
     run_step_optional "Removing file" "/usr/local/bin/ntp-status" rm -f /usr/local/bin/ntp-status
     remove_installed_utility_scripts
-    run_step_optional "Removing file" "/usr/local/sbin/linux-cli-auto-update" rm -f /usr/local/sbin/linux-cli-auto-update
+    run_step_optional "Removing file" "$AUTO_UPDATE_COMMAND" rm -f "$AUTO_UPDATE_COMMAND"
+    run_step_optional "Removing file" "$LEGACY_AUTO_UPDATE_COMMAND" rm -f "$LEGACY_AUTO_UPDATE_COMMAND"
     remove_auto_update_config
     run_step_optional "Removing file" "/etc/update-motd.d/50-linux-cli-setup" rm -f /etc/update-motd.d/50-linux-cli-setup
     run_step_optional "Removing file" "/etc/fish/conf.d/linux-cli-motd.fish" rm -f /etc/fish/conf.d/linux-cli-motd.fish

@@ -38,7 +38,7 @@ sudo ./install.sh --profile docker
 sudo ./install.sh --all-profiles
 ```
 
-Package names are read from [data/package-groups.tsv](data/package-groups.tsv). Edit that file to change which Arch or Debian/Ubuntu packages belong to each group. The file is tab-separated because each package column contains space-separated package lists; using tabs keeps manual edits and shell parsing simple without CSV quoting rules.
+Package names are read from [data/package-groups.yaml](data/package-groups.yaml). Edit that file to change which Arch or Debian/Ubuntu packages belong to each group. The YAML file keeps package names as one-per-line lists so manual edits are easier to review than the old tab-delimited map.
 
 Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
 Performance tuning and hardening are enabled by default. Use `--skip-performance` or `--skip-hardening` when you need to leave those settings untouched for a specific host.
@@ -111,7 +111,7 @@ Run the diagnostic checker when you want to find package name or repository disc
 ./install_test.sh --profile wireless,netops
 ```
 
-It reads [data/package-groups.tsv](data/package-groups.tsv), checks the current system's package manager, prints every package checked, and exits nonzero if any selected package is unavailable. On Arch, it checks pacman, installed yay, and the read-only AUR RPC. It does not install or enable anything.
+It reads [data/package-groups.yaml](data/package-groups.yaml), checks the current system's package manager, prints every package checked, and exits nonzero if any selected package is unavailable. On Arch, it checks pacman, installed yay, and the read-only AUR RPC. It does not install or enable anything.
 
 ## Git Defaults
 
@@ -292,26 +292,28 @@ Status and utility commands are installed into `/usr/local/bin`:
 ```bash
 time-status
 ntp-status
+timecheck
+ntpcheck
 aliases
 drivecheck
-docker-status
+dockercheck
 ```
 
-The `aliases` command prints the Fish abbreviations and aliases visible to the current user.
+The `aliases` command prints the Fish abbreviations and aliases visible to the current user. `timecheck` shows chrony and NTP source details, and `ntpcheck` is installed as an alias to it.
 
 ## Automatic Updates
 
-The installer adds `/usr/local/sbin/linux-cli-auto-update` for unattended Debian/Ubuntu and Arch updates. It installs `/etc/linux-cli-setup/auto-update.conf` as a root-only config file for local settings and Pushover credentials.
+The installer adds `/usr/local/bin/auto-update` for unattended Debian/Ubuntu and Arch updates. It installs `/etc/auto-update.conf` as a root-only config file for local settings and Pushover credentials.
 
 Real Pushover keys should be placed in that config file after install:
 
 ```bash
-sudoedit /etc/linux-cli-setup/auto-update.conf
+sudoedit /etc/auto-update.conf
 ```
 
 Do not commit real Pushover keys to this repository. The installed auto-update script uses Pushover through HTTPS with `curl`; no secrets are embedded in the repo.
 
-For local testing before install, use the ignored root `.auto-update.conf`. It is intentionally excluded from Git; the real runtime config still belongs in `/etc/linux-cli-setup/auto-update.conf`.
+For local testing before install, use the ignored root `.auto-update.conf`. It is intentionally excluded from Git; the real runtime config belongs in `/etc/auto-update.conf`.
 
 On systemd hosts, the installer enables `linux-cli-auto-update.timer`. It runs daily between 3:30 AM and 4:30 AM, giving systems with the same setup a randomized update window around 4 AM. If systemd is unavailable, the installer falls back to `/etc/cron.d/linux-cli-auto-update`.
 

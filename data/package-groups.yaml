@@ -1,0 +1,426 @@
+# Package group mapping for linux-cli-setup.
+#
+# Each item defines one profile/tier row. Package names are listed one per line
+# under the distro family where they are valid. Use an empty list when a row has
+# no packages for that distro family.
+package_groups:
+  - group: core
+    tier: required
+    arch:
+      - base-devel
+      - ca-certificates
+      - curl
+      - wget
+      - gnupg
+      - git
+      - openssh
+      - fish
+      - htop
+      - btop
+      - vim
+      - nfs-utils
+      - ufw
+      - chrony
+      - fail2ban
+      - logrotate
+      - unzip
+      - zip
+      - 7zip
+      - tar
+      - gzip
+      - xz
+      - tmux
+      - fontconfig
+    debian_ubuntu:
+      - ca-certificates
+      - curl
+      - wget
+      - gnupg
+      - git
+      - openssh-server
+      - fish
+      - htop
+      - btop
+      - vim
+      - nfs-common
+      - ufw
+      - chrony
+      - fail2ban
+      - logrotate
+      - unzip
+      - zip
+      - p7zip-full
+      - tar
+      - gzip
+      - xz-utils
+      - tmux
+      - fontconfig
+    notes: "Core CLI baseline, shell requirements, NTP, SSH protection, and log rotation."
+
+  - group: core
+    tier: recommended
+    arch:
+      - ripgrep
+      - fd
+      - fzf
+      - plocate
+      - bat
+      - eza
+      - tree
+      - less
+      - jq
+      - yq
+      - ncdu
+      - duf
+      - dust
+      - lnav
+      - man-db
+      - man-pages
+      - tldr
+      - fastfetch
+      - inxi
+      - git-delta
+      - pacman-contrib
+      - reflector
+      - pkgfile
+      - chezmoi
+      - ttf-jetbrains-mono-nerd
+      - lynis
+      - aide
+      - rsync
+      - pv
+      - glances
+      - atop
+      - dool
+      - vnstat
+      - bmon
+    debian_ubuntu:
+      - ripgrep
+      - fd-find
+      - fzf
+      - plocate
+      - bat
+      - eza
+      - tree
+      - less
+      - jq
+      - yq
+      - ncdu
+      - duf
+      - lnav
+      - man-db
+      - manpages
+      - tealdeer
+      - fastfetch
+      - inxi
+      - git-delta
+      - apt-file
+      - needrestart
+      - debian-goodies
+      - apt-transport-https
+      - unattended-upgrades
+      - nala
+      - lynis
+      - aide
+      - rsync
+      - pv
+      - glances
+      - atop
+      - vnstat
+      - bmon
+    notes: "Common CLI helpers, distro maintenance tools, security audit tools, transfer/throughput tools, and the Arch Nerd Font package. Debian uses tealdeer for tldr pages."
+
+  - group: comfort
+    tier: recommended
+    arch:
+      - atuin
+      - zoxide
+      - fzf
+      - direnv
+      - mise
+      - just
+      - watchexec
+      - hyperfine
+      - trash-cli
+      - tealdeer
+      - httpie
+      - jless
+      - fx
+      - miller
+      - ripgrep-all
+      - yazi
+      - zellij
+      - lazygit
+      - git-delta
+      - difftastic
+      - shellcheck
+      - shfmt
+      - gitleaks
+      - age
+      - sops
+      - chezmoi
+      - etckeeper
+      - rust
+      - python-pipx
+    debian_ubuntu:
+      - atuin
+      - zoxide
+      - fzf
+      - direnv
+      - just
+      - hyperfine
+      - trash-cli
+      - tealdeer
+      - httpie
+      - miller
+      - lazygit
+      - git-delta
+      - shellcheck
+      - shfmt
+      - gitleaks
+      - age
+      - etckeeper
+      - cargo
+      - pipx
+      - python3-venv
+    notes: "CLI comfort tools; missing commands are handled best-effort with user-level cargo or pipx fallbacks when available."
+
+  - group: dev
+    tier: recommended
+    arch:
+      - python
+      - python-pip
+      - python-pipx
+      - uv
+      - base-devel
+      - cmake
+      - pkgconf
+      - neovim
+    debian_ubuntu:
+      - python3
+      - python3-pip
+      - python3-venv
+      - pipx
+      - build-essential
+      - cmake
+      - pkg-config
+      - neovim
+    notes: "Coding, Python, and C/C++ tools."
+
+  - group: netops
+    tier: recommended
+    arch:
+      - bind
+      - iproute2
+      - iputils
+      - traceroute
+      - mtr
+      - tcpdump
+      - wireshark-cli
+      - nmap
+      - iperf3
+      - ethtool
+      - lsof
+      - whois
+      - openbsd-netcat
+      - socat
+      - arp-scan
+      - smbclient
+      - net-snmp
+      - wireguard-tools
+      - openvpn
+      - mosh
+      - sshfs
+      - rsync
+      - rclone
+      - rkhunter
+      - sslscan
+      - testssl.sh
+      - fping
+    debian_ubuntu:
+      - bind9-dnsutils
+      - iproute2
+      - iputils-ping
+      - traceroute
+      - mtr-tiny
+      - tcpdump
+      - tshark
+      - nmap
+      - iperf3
+      - ethtool
+      - lsof
+      - whois
+      - netcat-openbsd
+      - ncat
+      - socat
+      - arp-scan
+      - smbclient
+      - snmp
+      - snmp-mibs-downloader
+      - wireguard-tools
+      - openvpn
+      - mosh
+      - sshfs
+      - rsync
+      - rclone
+      - rkhunter
+      - sslscan
+      - testssl.sh
+      - fping
+    notes: "IT, security, and network troubleshooting tools. Arch nmap provides ncat; Debian/Ubuntu installs ncat separately."
+
+  - group: wireless
+    tier: recommended
+    arch:
+      - networkmanager
+      - wpa_supplicant
+      - iwd
+      - iw
+      - wireless_tools
+      - wireless-regdb
+      - util-linux
+      - linux-firmware
+      - usbutils
+      - pciutils
+      - modemmanager
+      - mobile-broadband-provider-info
+      - network-manager-applet
+      - plasma-nm
+    debian_ubuntu:
+      - network-manager
+      - wpasupplicant
+      - iwd
+      - iw
+      - wireless-tools
+      - rfkill
+      - usbutils
+      - pciutils
+      - firmware-linux
+      - firmware-linux-nonfree
+      - firmware-iwlwifi
+      - firmware-realtek
+      - firmware-atheros
+      - firmware-brcm80211
+      - firmware-misc-nonfree
+      - modemmanager
+      - mobile-broadband-provider-info
+      - network-manager-gnome
+      - plasma-nm
+    notes: "Wireless networking, firmware, mobile broadband, tray integration, and troubleshooting tools."
+
+  - group: storage
+    tier: recommended
+    arch:
+      - xfsprogs
+      - btrfs-progs
+      - dosfstools
+      - exfatprogs
+      - ntfs-3g
+      - cifs-utils
+      - cryptsetup
+      - pv
+      - ddrescue
+      - f3
+    debian_ubuntu:
+      - xfsprogs
+      - btrfs-progs
+      - dosfstools
+      - exfatprogs
+      - ntfs-3g
+      - cifs-utils
+      - cryptsetup
+      - pv
+      - gddrescue
+      - f3
+    notes: "Filesystem, removable media, SMB/CIFS, encryption, copy progress, recovery, and flash-media validation tools. Arch uses ddrescue; Debian/Ubuntu uses gddrescue."
+
+  - group: diagnostics
+    tier: recommended
+    arch:
+      - pciutils
+      - usbutils
+      - lshw
+      - dmidecode
+      - lm_sensors
+      - smartmontools
+      - nvme-cli
+      - parted
+      - gptfdisk
+      - iotop
+      - sysstat
+      - iftop
+      - nethogs
+      - strace
+      - lsof
+      - psmisc
+    debian_ubuntu:
+      - pciutils
+      - usbutils
+      - lshw
+      - dmidecode
+      - lm-sensors
+      - smartmontools
+      - nvme-cli
+      - parted
+      - gdisk
+      - iotop
+      - sysstat
+      - iftop
+      - nethogs
+      - strace
+      - lsof
+      - psmisc
+    notes: "Hardware, disk, sensor, I/O, network usage, and tracing diagnostics."
+
+  - group: docker
+    tier: required
+    arch:
+      - docker
+      - docker-compose
+    debian_ubuntu:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    notes: "Docker host packages; Debian/Ubuntu defaults to Docker's official repository."
+
+  - group: docker
+    tier: required_distro
+    arch: []
+    debian_ubuntu:
+      - docker.io
+    notes: "Debian/Ubuntu Docker fallback when LINUX_CLI_DOCKER_APT_SOURCE=distro or the official repository is unavailable."
+
+  - group: docker
+    tier: recommended
+    arch:
+      - lazydocker
+      - dive
+      - ctop
+      - hadolint
+    debian_ubuntu: []
+    notes: "Docker CLI helper tools packaged for Arch."
+
+  - group: docker
+    tier: recommended_distro
+    arch: []
+    debian_ubuntu:
+      - docker-compose
+    notes: "Debian/Ubuntu Docker distro fallback helper package."
+
+  - group: desktop
+    tier: recommended
+    arch:
+      - xclip
+      - wl-clipboard
+      - xsel
+      - xdg-utils
+      - libnotify
+    debian_ubuntu:
+      - xclip
+      - wl-clipboard
+      - xsel
+      - xdg-utils
+      - libnotify-bin
+    notes: "GUI workstation clipboard, desktop integration, and notification helpers."

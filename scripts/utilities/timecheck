@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+#
+# Show local time, chrony/NTP synchronization, selected server, and stratum.
+
+set -euo pipefail
+
+VERSION="0.4a"
+COMMAND_NAME="$(basename "$0")"
+
+show_help() {
+    cat <<HELP
+Usage: $COMMAND_NAME [--version] [--help]
+
+Show local time, timezone, chrony tracking details, NTP source status, selected
+time server, and stratum where the installed time clients expose them.
+HELP
+}
+
+case "${1:-}" in
+    "")
+        ;;
+    --version)
+        echo "$COMMAND_NAME $VERSION"
+        exit 0
+        ;;
+    --help)
+        show_help
+        exit 0
+        ;;
+    *)
+        echo "Unknown option: $1" >&2
+        exit 2
+        ;;
+esac
+
+print_heading() {
+    printf '\n%s\n' "$1"
+    printf '%s\n' "------------------------------------------------------------"
+}
+
+print_optional_value() {
+    local label="$1"
+    local value="$2"
+
+    [[ -n "$value" ]] || return 0
+    printf '%-28s %s\n' "$label:" "$value"
+}
+
+show_basic_time_status() {
+    local timezone="unknown"
+    local ntp_synchronized=""
+    local system_clock_synchronized=""
+    local ntp_service=""
+
+    if [[ -r /etc/timezone ]]; then
+        timezone="$(cat /etc/timezone)"
+    elif command -v timedatectl >/dev/null 2>&1; then
+        timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+        [[ -n "$timezone" ]] || timezone="unknown"
+    fi
+
+    print_heading "Local Time"
+    print_optional_value "Local time" "$(date)"
+    print_optional_value "UTC time" "$(date -u)"
+    print_optional_value "Timezone" "$timezone"
+
+    if command -v timedatectl >/dev/null 2>&1; then
+        ntp_synchronized="$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)"
+        system_clock_synchronized="$(timedatectl show -p SystemClockSynchronized --value 2>/dev/null || true)"
+        ntp_service="$(timedatectl show -p NTP --value 2>/dev/null || true)"
+
+        print_heading "System Time Status"
+        print_optional_value "NTP enabled" "$ntp_service"
+        print_optional_value "NTP synchronized" "$ntp_synchronized"
+        print_optional_value "System clock synchronized" "$system_clock_synchronized"
+    fi
+}
+
+show_timesyncd_status() {
+    local status
+    local selected_server
+    local selected_stratum
+
+    command -v timedatectl >/dev/null 2>&1 || return 1
+    status="$(timedatectl timesync-status --no-pager 2>/dev/null || true)"
+    [[ -n "$status" ]] || return 1
+
+    selected_server="$(awk -F': ' '/^[[:space:]]*Server:/ { print $2; exit }' <<< "$status")"
+    selected_stratum="$(awk -F': ' '/^[[:space:]]*Stratum:/ { print $2; exit }' <<< "$status")"
+
+    print_heading "systemd-timesyncd NTP Status"
+    print_optional_value "Selected server" "$selected_server"
+    print_optional_value "Selected stratum" "$selected_stratum"
+    printf '%s\n' "$status"
+    return 0
+}
+
+show_chrony_status() {
+    local tracking
+    local sources
+    local selected_source
+    local reference_id
+    local tracking_stratum
+    local source_name
+    local source_stratum
+
+    command -v chronyc >/dev/null 2>&1 || return 1
+
+    tracking="$(chronyc tracking 2>/dev/null || true)"
+    sources="$(chronyc sources -v 2>/dev/null || true)"
+
+    if [[ -z "$tracking" && -z "$sources" ]]; then
+        return 1
+    fi
+
+    reference_id="$(awk -F': ' '/^Reference ID/ { print $2; exit }' <<< "$tracking")"
+    tracking_stratum="$(awk -F': ' '/^Stratum/ { print $2; exit }' <<< "$tracking")"
+    selected_source="$(awk '$1 ~ /\*/ { print; exit }' <<< "$sources")"
+
+    if [[ -n "$selected_source" ]]; then
+        read -r _marker source_name source_stratum _rest <<< "$selected_source"
+    fi
+
+    print_heading "Chrony NTP Status"
+    print_optional_value "Reference ID" "$reference_id"
+    print_optional_value "Tracking stratum" "$tracking_stratum"
+    print_optional_value "Selected source" "$source_name"
+    print_optional_value "Selected source stratum" "$source_stratum"
+
+    if [[ -n "$tracking" ]]; then
+        printf '\n%s\n' "chronyc tracking:"
+        printf '%s\n' "$tracking"
+    fi
+
+    if [[ -n "$sources" ]]; then
+        printf '\n%s\n' "chronyc sources -v:"
+        printf '%s\n' "$sources"
+    fi
+
+    return 0
+}
+
+show_ntpq_status() {
+    local peers
+    local selected_peer
+    local remote
+    local stratum
+
+    command -v ntpq >/dev/null 2>&1 || return 1
+    peers="$(ntpq -p 2>/dev/null || true)"
+    [[ -n "$peers" ]] || return 1
+
+    selected_peer="$(awk '$1 ~ /^[*o]/ { print; exit }' <<< "$peers")"
+    if [[ -n "$selected_peer" ]]; then
+        read -r remote _refid stratum _rest <<< "$selected_peer"
+        remote="${remote#?}"
+    fi
+
+    print_heading "ntpq NTP Status"
+    print_optional_value "Selected peer" "$remote"
+    print_optional_value "Selected peer stratum" "$stratum"
+    printf '%s\n' "$peers"
+    return 0
+}
+
+main() {
+    local found_status=0
+
+    show_basic_time_status
+    show_timesyncd_status && found_status=1
+    show_chrony_status && found_status=1
+    show_ntpq_status && found_status=1
+
+    if [[ "$found_status" -eq 0 ]]; then
+        print_heading "NTP Status"
+        echo "No supported NTP status command was available."
+        exit 1
+    fi
+}
+
+main "$@"

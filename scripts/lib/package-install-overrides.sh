@@ -159,6 +159,14 @@ install_utility_scripts() {
         [[ "${script_name:0:1}" != "." ]] || continue
         install_owned_file "$script_file" "/usr/local/bin/$script_name" 0755 root root
     done < <(find "$UTILITY_SCRIPT_DIR" -maxdepth 1 -type f -print0 | sort -z)
+
+    if [[ -f "$UTILITY_SCRIPT_DIR/timecheck" ]]; then
+        install_owned_symlink timecheck /usr/local/bin/ntpcheck root root
+    fi
+
+    if [[ -f "$UTILITY_SCRIPT_DIR/dockercheck" ]]; then
+        remove_file_if_managed_or_backup /usr/local/bin/docker-status "$UTILITY_SCRIPT_DIR/dockercheck"
+    fi
 }
 
 install_status_commands() {
