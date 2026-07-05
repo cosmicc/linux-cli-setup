@@ -122,7 +122,11 @@ install_arch_package() {
 install_cargo_tool_if_missing() {
     local command_name="$1"
     local crate_name="$2"
+    local current_minimum_rust="${3:-}"
+    local compatible_crate_version="${4:-}"
     local package_label
+    local rustc_version=""
+    local crate_version=""
 
     package_label="$(package_display_name "$crate_name")"
     if target_command_exists "$command_name"; then
@@ -144,10 +148,30 @@ install_cargo_tool_if_missing() {
         return 0
     fi
 
+    if [[ -n "$current_minimum_rust" && -n "$compatible_crate_version" ]]; then
+        rustc_version="$(target_rustc_version)"
+        if [[ -z "$rustc_version" ]] || ! version_number_at_least "$rustc_version" "$current_minimum_rust"; then
+            crate_version="$compatible_crate_version"
+            package_label="${package_label}@${crate_version}"
+            if [[ -n "$rustc_version" ]]; then
+                log "Using cargo fallback $package_label because rustc $rustc_version is below $current_minimum_rust for newer $crate_name releases."
+            else
+                warn "Could not detect rustc version; using compatible cargo fallback $package_label."
+            fi
+        fi
+    fi
+
     # shellcheck disable=SC2016
-    if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "cargo tool $package_label" \
-        run_as_target bash -lc 'PATH="$HOME/.cargo/bin:$PATH"; cargo install --locked "$1"' bash "$crate_name"; then
-        record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin") cargo uninstall $(shell_quote "$crate_name")"
+    if [[ -n "$crate_version" ]]; then
+        if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "cargo tool $package_label" \
+            run_as_target bash -lc 'PATH="$HOME/.cargo/bin:$PATH"; cargo install --locked --version "$2" "$1"' bash "$crate_name" "$crate_version"; then
+            record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin") cargo uninstall $(shell_quote "$crate_name")"
+        fi
+    else
+        if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "cargo tool $package_label" \
+            run_as_target bash -lc 'PATH="$HOME/.cargo/bin:$PATH"; cargo install --locked "$1"' bash "$crate_name"; then
+            record_rollback_cmd "runuser -u $(shell_quote "$TARGET_USER") -- env HOME=$(shell_quote "$TARGET_HOME") PATH=$(shell_quote "$TARGET_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin") cargo uninstall $(shell_quote "$crate_name")"
+        fi
     fi
 }
 
