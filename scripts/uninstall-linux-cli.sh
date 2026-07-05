@@ -196,6 +196,14 @@ remove_managed_files() {
     run_step_optional "Removing file" "/etc/systemd/system/linux-cli-auto-update.timer" rm -f /etc/systemd/system/linux-cli-auto-update.timer
     run_step_optional "Removing file" "/etc/cron.d/linux-cli-auto-update" rm -f /etc/cron.d/linux-cli-auto-update
     run_step_optional "Removing file" "/etc/systemd/timesyncd.conf.d/10-linux-cli-setup.conf" rm -f /etc/systemd/timesyncd.conf.d/10-linux-cli-setup.conf
+    remove_file_if_managed_or_backup /etc/chrony.conf "$CHRONY_TEMPLATE_DIR/chrony.conf"
+    remove_file_if_managed_or_backup /etc/chrony/chrony.conf "$CHRONY_TEMPLATE_DIR/chrony.conf"
+    remove_file_if_managed_or_backup /etc/tmpfiles.d/linux-cli-chrony.conf "$CHRONY_TEMPLATE_DIR/tmpfiles.conf"
+    remove_file_if_managed_or_backup /usr/local/sbin/linux-cli-chrony-dhcp-source "$CHRONY_TEMPLATE_DIR/chrony-dhcp-source"
+    remove_file_if_managed_or_backup /etc/NetworkManager/dispatcher.d/20-linux-cli-chrony-dhcp "$CHRONY_TEMPLATE_DIR/networkmanager-dispatcher"
+    remove_file_if_managed_or_backup /etc/dhcp/dhclient-exit-hooks.d/linux-cli-chrony "$CHRONY_TEMPLATE_DIR/dhclient-exit-hook"
+    remove_file_if_managed_or_backup /etc/fail2ban/jail.d/linux-cli-setup.conf "$FAIL2BAN_TEMPLATE_DIR/jail.d/linux-cli-setup.conf"
+    remove_file_if_managed_or_backup /etc/logrotate.d/linux-cli-setup "$LOGROTATE_TEMPLATE_DIR/linux-cli-setup"
 
     if systemd_available; then
         run_step_optional "Reloading" "systemd manager configuration" systemctl daemon-reload

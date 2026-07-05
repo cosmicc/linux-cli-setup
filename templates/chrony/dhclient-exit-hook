@@ -1,0 +1,16 @@
+# shellcheck shell=sh
+# Managed by linux-cli-setup.
+#
+# dhclient hook for chrony DHCP NTP sources. This file is sourced by dhclient.
+
+if [ -x /usr/local/sbin/linux-cli-chrony-dhcp-source ]; then
+    case "${reason:-}" in
+        BOUND|RENEW|REBIND|REBOOT)
+            # shellcheck disable=SC2086
+            /usr/local/sbin/linux-cli-chrony-dhcp-source "${interface:-dhclient}" ${new_ntp_servers:-}
+            ;;
+        EXPIRE|FAIL|RELEASE|STOP)
+            /usr/local/sbin/linux-cli-chrony-dhcp-source "${interface:-dhclient}"
+            ;;
+    esac
+fi

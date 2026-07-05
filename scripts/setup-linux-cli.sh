@@ -131,9 +131,11 @@ main() {
     install_jetbrains_nerd_font_from_package_or_release
     enable_openssh_service
     configure_ufw_firewall
+    configure_fail2ban
     enable_arch_helpers
     configure_wireless_networking
     configure_time_sync
+    configure_logrotate
     apply_basic_os_hardening
     install_status_commands
     install_auto_update_service

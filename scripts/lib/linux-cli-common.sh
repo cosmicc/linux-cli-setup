@@ -12,6 +12,9 @@ SSH_TEMPLATE_DIR="$PROJECT_ROOT/templates/ssh"
 SYSCTL_TEMPLATE_DIR="$PROJECT_ROOT/templates/sysctl"
 MOTD_TEMPLATE="$PROJECT_ROOT/templates/motd/linux-cli-motd"
 AUTO_UPDATE_TEMPLATE_DIR="$PROJECT_ROOT/templates/auto-update"
+CHRONY_TEMPLATE_DIR="$PROJECT_ROOT/templates/chrony"
+FAIL2BAN_TEMPLATE_DIR="$PROJECT_ROOT/templates/fail2ban"
+LOGROTATE_TEMPLATE_DIR="$PROJECT_ROOT/templates/logrotate"
 BIN_TEMPLATE_DIR="$PROJECT_ROOT/templates/bin"
 SYSTEMD_TEMPLATE_DIR="$PROJECT_ROOT/templates/systemd"
 CRON_TEMPLATE_DIR="$PROJECT_ROOT/templates/cron"
@@ -260,7 +263,7 @@ project_version() {
         return
     fi
 
-    printf '0.3a'
+    printf '0.4a'
 }
 
 print_version() {
@@ -1023,12 +1026,29 @@ package_is_available() {
             if command -v yay >/dev/null 2>&1 && yay -Si "$package" >/dev/null 2>&1; then
                 return 0
             fi
+            if arch_package_available_in_aur_rpc "$package"; then
+                return 0
+            fi
             return 1
             ;;
         *)
             return 1
             ;;
     esac
+}
+
+arch_package_available_in_aur_rpc() {
+    local package="$1"
+
+    [[ "$package" =~ ^[A-Za-z0-9@._+-]+$ ]] || return 1
+    command -v curl >/dev/null 2>&1 || return 1
+
+    curl -fsSLG --connect-timeout 5 --max-time 10 \
+        --data-urlencode v=5 \
+        --data-urlencode type=info \
+        --data-urlencode "arg[]=$package" \
+        https://aur.archlinux.org/rpc/ |
+        grep -Eq '"resultcount":[[:space:]]*[1-9]'
 }
 
 test_package_availability_for_profiles() {
@@ -1939,25 +1959,61 @@ install_status_commands() {
     install_owned_file "$BIN_TEMPLATE_DIR/ntp-status" /usr/local/bin/ntp-status 0755 root root
 }
 
+chrony_service_name() {
+    case "$PACKAGE_FAMILY" in
+        debian)
+            printf 'chrony.service'
+            ;;
+        arch)
+            printf 'chronyd.service'
+            ;;
+        *)
+            printf 'chronyd.service'
+            ;;
+    esac
+}
+
+chrony_config_path() {
+    case "$PACKAGE_FAMILY" in
+        debian)
+            printf '/etc/chrony/chrony.conf'
+            ;;
+        arch)
+            printf '/etc/chrony.conf'
+            ;;
+        *)
+            printf '/etc/chrony.conf'
+            ;;
+    esac
+}
+
+disable_legacy_time_sync_service() {
+    if systemd_available && systemctl list-unit-files --no-legend systemd-timesyncd.service 2>/dev/null | grep -q '^systemd-timesyncd\.service'; then
+        run_step_optional "Disabling service" "systemd-timesyncd.service" systemctl disable --now systemd-timesyncd.service || true
+    fi
+
+    run_step_optional "Removing file" "/etc/systemd/timesyncd.conf.d/10-linux-cli-setup.conf" rm -f /etc/systemd/timesyncd.conf.d/10-linux-cli-setup.conf || true
+
+    if [[ "$PACKAGE_FAMILY" == "debian" ]] && package_is_installed systemd-timesyncd; then
+        record_rollback_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y systemd-timesyncd"
+        export DEBIAN_FRONTEND=noninteractive
+        run_step_optional "Removing" "apt package systemd-timesyncd" apt-get remove -y systemd-timesyncd || true
+    fi
+}
+
 configure_time_sync() {
     local old_timezone=""
-    local old_ntp=""
-    local timesync_conf_dir="/etc/systemd/timesyncd.conf.d"
-    local timesync_conf_tmp
+    local chrony_service
+    local chrony_config
 
     old_timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
-    old_ntp="$(timedatectl show -p NTP --value 2>/dev/null || true)"
 
     if [[ -n "$old_timezone" ]]; then
         record_rollback_cmd "timedatectl set-timezone $(shell_quote "$old_timezone")"
     fi
-    if [[ -n "$old_ntp" ]]; then
-        record_rollback_cmd "timedatectl set-ntp $(shell_quote "$old_ntp")"
-    fi
 
     if command -v timedatectl >/dev/null 2>&1; then
         run_step "Configuring timezone" "America/Detroit" timedatectl set-timezone America/Detroit
-        run_step "Configuring NTP" "automatic time synchronization" timedatectl set-ntp true
     else
         [[ -f /etc/localtime ]] && backup_existing_path /etc/localtime
         [[ -f /etc/timezone ]] && backup_existing_path /etc/timezone
@@ -1965,25 +2021,46 @@ configure_time_sync() {
         printf '%s\n' "America/Detroit" > /etc/timezone
     fi
 
-    if [[ -d /etc/systemd || -x "$(command -v systemctl 2>/dev/null || true)" ]]; then
-        run_step "Creating directory" "$timesync_conf_dir" mkdir -p "$timesync_conf_dir"
-        timesync_conf_tmp="$(mktemp)"
-        {
-            printf '[Time]\n'
-            printf '# DHCP-provided NTP servers remain preferred by systemd-timesyncd.\n'
-            printf '# This pool is used when no link-specific DHCP NTP server is available.\n'
-            printf 'FallbackNTP=us.pool.ntp.org\n'
-        } > "$timesync_conf_tmp"
-        install_owned_file "$timesync_conf_tmp" "$timesync_conf_dir/10-linux-cli-setup.conf" 0644 root root
-        rm -f "$timesync_conf_tmp"
+    log "Configuring chrony for DHCP-provided NTP servers with us.pool.ntp.org fallback"
+    disable_legacy_time_sync_service
+    chrony_service="$(chrony_service_name)"
+    chrony_config="$(chrony_config_path)"
 
-        if systemd_available && systemctl list-unit-files --no-legend systemd-timesyncd.service 2>/dev/null | grep -q '^systemd-timesyncd\.service'; then
-            run_step "Enabling service" "systemd-timesyncd.service" systemctl enable --now systemd-timesyncd.service
-            run_step_optional "Restarting service" "systemd-timesyncd.service" systemctl restart systemd-timesyncd.service
-        fi
-    else
-        warn "systemd-timesyncd is unavailable; automatic NTP could not be configured by this script."
+    run_step "Creating directory" "/etc/chrony/sources.d" install -m 0755 -d /etc/chrony/sources.d
+    run_step "Creating directory" "/run/chrony-dhcp" install -m 0755 -d /run/chrony-dhcp
+    install_owned_file "$CHRONY_TEMPLATE_DIR/chrony.conf" "$chrony_config" 0644 root root
+    install_owned_file "$CHRONY_TEMPLATE_DIR/tmpfiles.conf" /etc/tmpfiles.d/linux-cli-chrony.conf 0644 root root
+    install_owned_file "$CHRONY_TEMPLATE_DIR/chrony-dhcp-source" /usr/local/sbin/linux-cli-chrony-dhcp-source 0755 root root
+    install_owned_file "$CHRONY_TEMPLATE_DIR/networkmanager-dispatcher" /etc/NetworkManager/dispatcher.d/20-linux-cli-chrony-dhcp 0755 root root
+    install_owned_file "$CHRONY_TEMPLATE_DIR/dhclient-exit-hook" /etc/dhcp/dhclient-exit-hooks.d/linux-cli-chrony 0644 root root
+
+    if command -v systemd-tmpfiles >/dev/null 2>&1; then
+        run_step_optional "Creating runtime directory" "/run/chrony-dhcp" systemd-tmpfiles --create /etc/tmpfiles.d/linux-cli-chrony.conf || true
     fi
+
+    if systemd_available; then
+        run_step "Enabling service" "$chrony_service" systemctl enable --now "$chrony_service"
+        run_step_optional "Restarting service" "$chrony_service" systemctl restart "$chrony_service" || true
+    else
+        warn "systemd is unavailable; chrony was configured but not enabled by this script."
+    fi
+}
+
+configure_fail2ban() {
+    log "Configuring fail2ban for SSH protection"
+    install_owned_file "$FAIL2BAN_TEMPLATE_DIR/jail.d/linux-cli-setup.conf" /etc/fail2ban/jail.d/linux-cli-setup.conf 0644 root root
+
+    if systemd_available; then
+        run_step "Enabling service" "fail2ban.service" systemctl enable --now fail2ban.service
+        run_step_optional "Restarting service" "fail2ban.service" systemctl restart fail2ban.service || true
+    else
+        warn "systemd is unavailable; fail2ban was configured but not enabled by this script."
+    fi
+}
+
+configure_logrotate() {
+    log "Configuring logrotate for linux-cli-setup logs"
+    install_owned_file "$LOGROTATE_TEMPLATE_DIR/linux-cli-setup" /etc/logrotate.d/linux-cli-setup 0644 root root
 }
 
 install_auto_update_config() {

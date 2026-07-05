@@ -1,0 +1,9 @@
+/var/log/linux-cli-setup/*.log {
+    weekly
+    rotate 12
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0644 root root
+}

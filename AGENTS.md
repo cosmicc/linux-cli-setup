@@ -62,7 +62,7 @@ Keep `core` first in install, refresh execution order, and saved state. When `in
 - Install state belongs in `/var/lib/linux-cli-setup/install.env`; preserve the originally saved shell across updates.
 - Package group contents belong in `data/package-groups.tsv`, not hardcoded shell case blocks. The file uses tab-separated columns for group, tier, Arch packages, Debian/Ubuntu packages, and notes.
 - Script logs belong in `/var/log/linux-cli-setup/`; create one log file per install, update, uninstall, or auto-update execution.
-- `install_test.sh` may run without root and may fall back to a repository-local `logs/` directory when `/var/log/linux-cli-setup/` is not writable. It must not install, update, remove, enable, or disable anything.
+- `install_test.sh` may run without root and may fall back to a repository-local `logs/` directory when `/var/log/linux-cli-setup/` is not writable. It must not install, update, remove, enable, or disable anything. On Arch, it may use the read-only AUR RPC to verify documented AUR fallback packages when `yay` is not installed.
 - Package-manager output must stay suppressed by default. Console output should show each item being installed, updated, or uninstalled, with colored status lines unless `--no-color` is passed.
 - Executable script options must use long `--option` names only. Keep `--help` and `--version` on executable scripts.
 - After root detection and log initialization, install and uninstall must check GitHub releases and prereleases for a newer project version before making system changes. The compatibility `update.sh` wrapper delegates to `install.sh`, so it receives the same check there. If a newer version is available, fetch and pull from the trusted `cosmicc/linux-cli-setup` `origin/main`, show Git progress, create a temporary restart wrapper under `/tmp`, and exec the same entrypoint with the original arguments. Keep `LINUX_CLI_SELF_UPDATE_RESTARTED=1` as the loop guard.
@@ -82,12 +82,12 @@ Keep these package mappings aligned with `data/package-groups.tsv`. The TSV file
 
 ### Core
 
-Core always includes OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, prompt config, and MOTD.
+Core always includes OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony, fail2ban, logrotate, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, prompt config, and MOTD.
 
 | Purpose | Arch / Garuda | Debian / Ubuntu |
 | --- | --- | --- |
 | Downloads / repos | `curl`, `wget`, `ca-certificates`, `gnupg` | `curl`, `wget`, `ca-certificates`, `gnupg` |
-| Archives | `unzip`, `zip`, `p7zip`, `tar`, `gzip`, `xz` | `unzip`, `zip`, `p7zip-full`, `tar`, `gzip`, `xz-utils` |
+| Archives | `unzip`, `zip`, `7zip`, `tar`, `gzip`, `xz` | `unzip`, `zip`, `p7zip-full`, `tar`, `gzip`, `xz-utils` |
 | Terminal multiplexer | `tmux` | `tmux` |
 | Baseline editor | `vim` | `vim` |
 | NFS client support | `nfs-utils` | `nfs-common` |
@@ -100,6 +100,7 @@ Core always includes OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, 
 | Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tldr` |
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | `chezmoi` |
+| Time sync / SSH protection / log rotation | `chrony`, `fail2ban`, `logrotate` | `chrony`, `fail2ban`, `logrotate` |
 | Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
 | Transfer / throughput | `rsync`, `pv` | `rsync`, `pv` |
 | System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `dstat`, `vnstat`, `bmon` |
@@ -154,7 +155,7 @@ If `delta` exists, configure `core.pager`, `interactive.diffFilter`, `delta.navi
 | SNMP | `net-snmp` | `snmp`, `snmp-mibs-downloader` |
 | VPN tools | `wireguard-tools`, `openvpn` | `wireguard-tools`, `openvpn` |
 
-Also include `mosh`, `sshfs`, `rsync`, `rclone`, `fail2ban`, and `rkhunter`.
+Also include `mosh`, `sshfs`, `rsync`, `rclone`, and `rkhunter`. Keep fail2ban in core because SSH protection should be enabled on the baseline install.
 
 ### Wireless
 
@@ -221,7 +222,9 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 ## Time And Automatic Updates
 
 - The installer should set the timezone to `America/Detroit`.
-- Enable automatic NTP synchronization. On systemd systems, prefer DHCP-provided NTP servers and use `us.pool.ntp.org` as the fallback pool through `systemd-timesyncd`.
+- Enable automatic NTP synchronization through chrony. Configure chrony to read DHCP-provided NTP servers from `/run/chrony-dhcp` and use `us.pool.ntp.org` as the public fallback pool. Install managed NetworkManager and dhclient hooks that write DHCP NTP servers into chrony's sourcedir, plus a tmpfiles entry that recreates the runtime directory after reboot. Disable `systemd-timesyncd` and remove the Debian/Ubuntu `systemd-timesyncd` package when present.
+- Install and enable fail2ban from core with a managed SSH jail that reads from the systemd journal and bans through UFW.
+- Install and configure logrotate from core for `/var/log/linux-cli-setup/*.log`.
 - Install `time-status` and `ntp-status` into `/usr/local/bin`.
 - Install regular files from `scripts/utilities/` into `/usr/local/bin` as root-owned executable utility commands. Uninstall should remove matching managed utility commands by comparing them against the repository copies and should back up changed local files instead of deleting them. The `aliases` utility must print all Fish abbreviations and aliases visible to the current user.
 - Install `/usr/local/sbin/linux-cli-auto-update` and `/etc/linux-cli-setup/auto-update.conf`.
@@ -248,9 +251,9 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 Before finishing installer changes, run the practical checks available in the current environment:
 
 ```bash
-bash -n install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
-fish -n templates/fish/config.fish templates/fish/configure_tide.fish templates/fish/conf.d/linux-cli-motd.fish templates/fish/functions/*.fish
-shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update
+for file in install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook; do bash -n "$file"; done
+for file in templates/fish/config.fish templates/fish/configure_tide.fish templates/fish/conf.d/linux-cli-motd.fish templates/fish/functions/*.fish; do fish -n "$file"; done
+shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook
 ./install.sh --list-profiles
 ./install.sh --help
 ./install.sh --version

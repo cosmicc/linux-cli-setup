@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+#
+# Write DHCP-provided NTP servers into chrony's sourcedir.
+
+set -euo pipefail
+
+interface="${1:-}"
+if [[ -z "$interface" ]]; then
+    exit 0
+fi
+shift || true
+
+safe_interface="$(printf '%s' "$interface" | tr -c 'A-Za-z0-9_.-' '_')"
+source_dir="/run/chrony-dhcp"
+source_file="$source_dir/linux-cli-${safe_interface}.sources"
+
+install -m 0755 -d "$source_dir"
+
+if [[ "$#" -eq 0 ]]; then
+    rm -f "$source_file"
+else
+    tmp_file="$(mktemp)"
+    for server in "$@"; do
+        [[ -n "$server" ]] || continue
+        [[ "$server" =~ ^[A-Za-z0-9:._-]+$ ]] || continue
+        printf 'server %s iburst\n' "$server" >> "$tmp_file"
+    done
+
+    if [[ -s "$tmp_file" ]]; then
+        install -m 0644 "$tmp_file" "$source_file"
+    else
+        rm -f "$source_file"
+    fi
+    rm -f "$tmp_file"
+fi
+
+if command -v chronyc >/dev/null 2>&1; then
+    chronyc reload sources >/dev/null 2>&1 || true
+fi

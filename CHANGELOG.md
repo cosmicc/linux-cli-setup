@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4a - Unreleased
+
+### Added
+
+- Added chrony, fail2ban, and logrotate to the core package set for baseline NTP, SSH protection, and log maintenance.
+- Added managed chrony configuration with DHCP NTP sources and `us.pool.ntp.org` fallback.
+- Added managed NetworkManager and dhclient hooks that pass DHCP-provided NTP servers to chrony.
+- Added a managed systemd-tmpfiles entry for chrony's DHCP source directory.
+- Added a managed fail2ban SSH jail that reads from the systemd journal and bans through UFW.
+- Added a managed logrotate policy for `/var/log/linux-cli-setup/*.log`.
+
+### Changed
+
+- Changed time synchronization from systemd-timesyncd to chrony and disabled the previous timesyncd service during install or refresh.
+- Moved fail2ban ownership from the netops profile into core.
+- Changed the Arch archive package mapping from retired `p7zip` to current `7zip`.
+- Changed package diagnostics to verify Arch AUR fallback packages through the read-only AUR RPC when `yay` is not installed.
+- Clarified `update.sh --help` now that updates are handled through the installer refresh path.
+- Corrected the agent validation commands so Bash and Fish syntax checks cover every listed file.
+
 ## 0.3a - 07.05.2026
 
 ### Added

@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.3a"
+VERSION="0.4a"
 
 case "${1:-}" in
     "")

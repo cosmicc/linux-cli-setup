@@ -2,7 +2,7 @@
 
 Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. A fresh install defaults to a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, Docker hosting, and desktop helpers are optional package groups.
 
-Current alpha prerelease version: `0.3a`.
+Current unreleased alpha testing version: `0.4a`.
 
 ## Supported Systems
 
@@ -69,14 +69,14 @@ Available profiles:
 
 ## Core Install
 
-The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt with rounded left and right status segments, including Git status, long-command duration, and project/toolchain indicators when Tide detects them, and a dynamic MOTD. Rerunning install refreshes the Tide settings and managed prompt file. The managed Fisher plugin set installed by default is Fisher, Tide, fzf.fish, autopair.fish, bass, and done.
+The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony, fail2ban, logrotate, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt with rounded left and right status segments, including Git status, long-command duration, and project/toolchain indicators when Tide detects them, and a dynamic MOTD. Rerunning install refreshes the Tide settings and managed prompt file. The managed Fisher plugin set installed by default is Fisher, Tide, fzf.fish, autopair.fish, bass, and done.
 
 It also adds common CLI tools:
 
 | Purpose | Arch / Garuda | Debian / Ubuntu |
 | --- | --- | --- |
 | Downloads / repos | `curl`, `wget`, `ca-certificates`, `gnupg` | `curl`, `wget`, `ca-certificates`, `gnupg` |
-| Archives | `unzip`, `zip`, `p7zip`, `tar`, `gzip`, `xz` | `unzip`, `zip`, `p7zip-full`, `tar`, `gzip`, `xz-utils` |
+| Archives | `unzip`, `zip`, `7zip`, `tar`, `gzip`, `xz` | `unzip`, `zip`, `p7zip-full`, `tar`, `gzip`, `xz-utils` |
 | Terminal multiplexer | `tmux` | `tmux` |
 | Baseline editor | `vim` | `vim` |
 | NFS client support | `nfs-utils` | `nfs-common` |
@@ -89,6 +89,7 @@ It also adds common CLI tools:
 | Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tldr` |
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | `chezmoi` |
+| Time sync / SSH protection / log rotation | `chrony`, `fail2ban`, `logrotate` | `chrony`, `fail2ban`, `logrotate` |
 | Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
 | Transfer / throughput | `rsync`, `pv` | `rsync`, `pv` |
 | System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `dstat`, `vnstat`, `bmon` |
@@ -108,6 +109,10 @@ Run the diagnostic checker when you want to find package name or repository disc
 ./install_test.sh
 ./install_test.sh --profile wireless,netops
 ```
+
+On Arch systems, the diagnostic checks official repositories first, then uses
+`yay` or the read-only AUR RPC to verify documented AUR fallback packages. It
+does not install or enable anything.
 
 It reads [data/package-groups.tsv](data/package-groups.tsv), checks the current system's package manager, prints every package checked, and exits nonzero if any selected package is unavailable.
 
@@ -138,7 +143,7 @@ The installer also creates a managed SSH include file at `~/.ssh/conf.d/00-defau
 
 ### Netops
 
-Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, TLS/SSL testing, bandwidth and latency testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, SNMP, VPN tools, `mosh`, `sshfs`, `rsync`, `rclone`, `fail2ban`, and `rkhunter`.
+Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, TLS/SSL testing, bandwidth and latency testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, SNMP, VPN tools, `mosh`, `sshfs`, `rsync`, `rclone`, and `rkhunter`. SSH brute-force protection is configured by the core fail2ban install.
 
 | Purpose | Arch | Debian / Ubuntu |
 | --- | --- | --- |
@@ -283,7 +288,9 @@ Uninstall removes managed files, restores the saved shell, re-enables disabled M
 
 ## Time And NTP
 
-The installer sets the system timezone to `America/Detroit` and enables automatic NTP synchronization. On systemd systems, it configures `systemd-timesyncd` so DHCP-provided NTP servers remain preferred and `us.pool.ntp.org` is used as the fallback pool.
+The installer sets the system timezone to `America/Detroit` and configures chrony for automatic NTP synchronization. Managed NetworkManager and dhclient hooks pass DHCP-provided NTP servers into chrony, and `us.pool.ntp.org` is configured as the public fallback pool. A managed tmpfiles entry recreates chrony's DHCP source directory after reboot. The installer disables the legacy `systemd-timesyncd` service and removes the Debian/Ubuntu `systemd-timesyncd` package when present.
+
+Core also enables fail2ban with an SSH jail that reads from the systemd journal and bans through UFW. A managed logrotate policy rotates `/var/log/linux-cli-setup/*.log` weekly.
 
 Status and utility commands are installed into `/usr/local/bin`:
 
