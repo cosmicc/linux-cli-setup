@@ -21,9 +21,9 @@ set -U tide_left_prompt_separator_diff_color ''
 set -U tide_right_prompt_separator_diff_color ''
 
 set -U tide_left_prompt_items os pwd newline character
-set -U tide_right_prompt_items context time
+set -U tide_right_prompt_items cmd_duration context time
 set -U _tide_left_items os pwd newline character
-set -U _tide_right_items context time
+set -U _tide_right_items cmd_duration context time
 
 if functions -q _tide_detect_os
     _tide_detect_os | read -l --line os_icon os_color os_bg_color
@@ -61,8 +61,8 @@ set -U tide_time_bg_color 1C1C1C
 set -U tide_time_color 5F8787
 set -U tide_time_format '%I:%M:%S %p'
 
-set -U tide_cmd_duration_bg_color black
-set -U tide_cmd_duration_color yellow
+set -U tide_cmd_duration_bg_color 1C1C1C
+set -U tide_cmd_duration_color 87875F
 set -U tide_cmd_duration_decimals 0
 set -U tide_cmd_duration_icon '󰔟'
 set -U tide_cmd_duration_threshold 3000
