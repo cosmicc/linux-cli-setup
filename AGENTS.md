@@ -4,7 +4,7 @@ This is the first-read guide for agents working in `linux-cli-setup`. Read this 
 
 ## Project Purpose
 
-This project provides root-run Linux setup, refresh, and uninstall scripts for CLI-focused systems. It supports Arch-based systems with `pacman`/`yay` and Debian/Ubuntu-based systems with `apt`. The default fresh install is the `core` profile; optional profiles add CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, diagnostics, Docker host, and desktop workstation tooling.
+This project provides root-run Linux setup, refresh, and uninstall scripts for CLI-focused systems. It supports Arch-based systems with `pacman` and Debian/Ubuntu-based systems with `apt`. The default fresh install is the `core` profile; optional profiles add CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, diagnostics, Docker host, and desktop workstation tooling.
 
 ## Repository Map
 
@@ -19,7 +19,9 @@ This project provides root-run Linux setup, refresh, and uninstall scripts for C
 - `scripts/lib/package-install-overrides.sh` contains runtime install overrides for availability-aware package installs and installed utility commands.
 - `scripts/utilities/` contains managed utility commands copied to `/usr/local/bin`, including `aliases` for printing Fish abbreviations and aliases.
 - `templates/fish/` contains Fish, Fisher, Tide, abbreviation, and fallback MOTD hook templates.
-- `templates/sysctl/` contains managed sysctl hardening templates.
+- `templates/sysctl/` contains managed sysctl hardening and performance templates.
+- `templates/ssh/sshd_config.d/` contains managed OpenSSH daemon hardening snippets.
+- `templates/apt/` contains managed Debian/Ubuntu apt hardening snippets.
 - `templates/motd/linux-cli-motd` contains the dynamic MOTD script installed on target systems.
 - `templates/bin/` contains installed CLI status commands such as `time-status` and `ntp-status`.
 - `templates/auto-update/` contains the installed automatic update script and root-only config template.
@@ -55,22 +57,24 @@ Keep `core` first in install, refresh execution order, and saved state. When `in
 - The target account is the sudoing user from `$SUDO_USER`, not `root`. Root-only direct runs must require `TARGET_USER=username` or saved state.
 - Package-family detection should stay conservative: prefer `pacman` for Arch-based systems and `apt-get` for Debian/Ubuntu-based systems.
 - Install, update, uninstall, and package availability tests must fail clearly on systems without `pacman` or `apt-get`. Install/update/uninstall should run this support check after root/log initialization and before GitHub self-update or managed-file changes.
-- Arch installs must ensure `yay` is available before AUR fallback installs.
+- Arch package rows must use packages available through pacman repositories. Do not add AUR-only packages to `data/package-groups.tsv`.
 - Debian/Ubuntu scripts must use noninteractive `apt-get`. Installing `nala` is fine, but scripts must not depend on it.
 - Existing user Fish files must be backed up before replacement unless the installed file already matches the project template.
 - Fish should become the target user's default shell through `/etc/shells` plus `chsh` or `usermod`.
 - Install state belongs in `/var/lib/linux-cli-setup/install.env`; preserve the originally saved shell across updates.
 - Package group contents belong in `data/package-groups.tsv`, not hardcoded shell case blocks. The file uses tab-separated columns for group, tier, Arch packages, Debian/Ubuntu packages, and notes.
 - Script logs belong in `/var/log/linux-cli-setup/`; create one log file per install, update, uninstall, or auto-update execution.
-- `install_test.sh` may run without root and may fall back to a repository-local `logs/` directory when `/var/log/linux-cli-setup/` is not writable. It must not install, update, remove, enable, or disable anything. On Arch, it may use the read-only AUR RPC to verify documented AUR fallback packages when `yay` is not installed.
+- `install_test.sh` may run without root and may fall back to a repository-local `logs/` directory when `/var/log/linux-cli-setup/` is not writable. It must not install, update, remove, enable, or disable anything.
 - Package-manager output must stay suppressed by default. Console output should show each item being installed, updated, or uninstalled, with colored status lines unless `--no-color` is passed.
 - Executable script options must use long `--option` names only. Keep `--help` and `--version` on executable scripts.
 - After root detection and log initialization, install and uninstall must check GitHub releases and prereleases for a newer project version before making system changes. The compatibility `update.sh` wrapper delegates to `install.sh`, so it receives the same check there. If a newer version is available, fetch and pull from the trusted `cosmicc/linux-cli-setup` `origin/main`, show Git progress, create a temporary restart wrapper under `/tmp`, and exec the same entrypoint with the original arguments. Keep `LINUX_CLI_SELF_UPDATE_RESTARTED=1` as the loop guard.
 - Self-update version ordering must support alpha and beta prerelease labels such as `0.1a` and `0.5b`, with final releases such as `v1.0` ranking after prereleases at the same numeric version. Do not auto-update from an unexpected GitHub remote.
 - `--debug` must show captured command output and command details in both console and log files.
 - Required install/update failures must print the error and the last captured output for the failing item, then roll back managed changes from that run. Package-manager system upgrades are not fully reversible; document that limit instead of pretending otherwise.
-- Install and saved-profile refresh should configure UFW after OpenSSH is enabled. Preserve existing UFW rules, set default deny incoming/default allow outgoing, allow SSH, allow iperf3 on TCP/UDP `5201`, and keep ICMP echo-request ping allowed.
+- Install and saved-profile refresh should run performance tuning and hardening by default. `--skip-performance` must skip the performance section, and `--skip-hardening` must skip firewall, fail2ban, sysctl, OpenSSH daemon, and apt hardening changes.
+- The hardening section should configure UFW after OpenSSH is enabled. Preserve existing UFW rules, set default deny incoming/default allow outgoing, allow SSH, allow iperf3 on TCP/UDP `5201`, and keep ICMP echo-request ping allowed.
 - Install and saved-profile refresh should apply only basic, non-obtrusive OS hardening. Hardening must be best-effort and must not abort the installer.
+- The performance section should stay conservative: managed sysctl values, systemd `fstrim.timer` when available, and no hardware-specific CPU, mount, or I/O scheduler changes without an explicit user request.
 - Install and saved-profile refresh should remove unused packages and clean package caches near the end of the run. Cleanup failures should warn and continue.
 - Uninstall must keep going after individual errors and report warnings instead of aborting the whole run.
 - Full package removal must remain behind the explicit `--remove-packages` flag. Exact restoration of package-manager upgrades, firewall state, time settings, service enablement, and packages that predated linux-cli-setup is not guaranteed unless the project has tracked that specific prior state.
@@ -97,20 +101,20 @@ Core always includes OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony
 | JSON / YAML | `jq`, `yq` | `jq`, `yq` |
 | Disk usage | `ncdu`, `duf`, `dust` | `ncdu`, `duf` |
 | Logs | `lnav` | `lnav` |
-| Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tldr` |
+| Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tealdeer` |
 | System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
-| Dotfiles | `chezmoi` | `chezmoi` |
+| Dotfiles | `chezmoi` | not packaged in Debian stable |
 | Time sync / SSH protection / log rotation | `chrony`, `fail2ban`, `logrotate` | `chrony`, `fail2ban`, `logrotate` |
-| Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
+| Security audit / integrity | `lynis` | `lynis`, `aide` |
 | Transfer / throughput | `rsync`, `pv` | `rsync`, `pv` |
-| System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `dstat`, `vnstat`, `bmon` |
+| System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `vnstat`, `bmon` |
 | Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
 
 Arch-specific core additions are `pacman-contrib`, `reflector`, `pkgfile`, and `base-devel`. Enable `paccache.timer` and run `pkgfile -u` when available.
 
-Debian/Ubuntu-specific additions are `apt-file`, `needrestart`, `debian-goodies`, `software-properties-common`, `apt-transport-https`, `unattended-upgrades`, and `nala`.
+Debian/Ubuntu-specific additions are `apt-file`, `needrestart`, `debian-goodies`, `apt-transport-https`, `unattended-upgrades`, and `nala`.
 
-Arch does not ship `aide` in the official repositories; keep it recommended so the existing `yay` fallback can install the AUR `aide` package without making core a hard failure. Debian/Ubuntu does not ship `dool` in the stable package set, so the apt-side package is `dstat`.
+Do not keep package-map entries for packages that are missing from the selected system's normal package sources. Docker's Debian/Ubuntu official-repository packages are the only exception because the Docker profile adds that repository before installing them.
 
 ### Comfort
 
@@ -139,7 +143,7 @@ If `delta` exists, configure `core.pager`, `interactive.diffFilter`, `delta.navi
 
 | Purpose | Arch | Debian / Ubuntu |
 | --- | --- | --- |
-| DNS tools | `bind` | `dnsutils` |
+| DNS tools | `bind` | `bind9-dnsutils` |
 | Ping/IP tools | `iproute2`, `iputils` | `iproute2`, `iputils-ping` |
 | Trace / latency | `traceroute`, `mtr` | `traceroute`, `mtr-tiny` |
 | Packet capture | `tcpdump`, `wireshark-cli` | `tcpdump`, `tshark` |
@@ -182,8 +186,6 @@ The `storage` profile should install filesystem administration, removable-media,
 | GNU ddrescue | `ddrescue` | `gddrescue` |
 | Flash-media validation | `f3` | `f3` |
 
-Arch does not ship `f3` in the official repositories; keep it recommended so the existing `yay` fallback can install the AUR `f3` package.
-
 ### Diagnostics
 
 | Purpose | Arch | Debian / Ubuntu |
@@ -211,9 +213,9 @@ Install or upgrade `ruff`, `black`, `pytest`, and `pre-commit` through `pipx`.
 
 ### Docker
 
-Docker must be opt-in. On Arch, install `docker`, `docker-compose`, `lazydocker`, `dive`, `ctop`, and `hadolint`, enable Docker, and add the target user to the `docker` group.
+Docker must be opt-in. On Arch, install `docker`, `docker-compose`, `lazydocker`, `dive`, and `ctop`, enable Docker, and add the target user to the `docker` group.
 
-On Debian/Ubuntu, prefer Docker's official apt repository for production-style hosts and install Docker Engine, CLI, containerd, Buildx, and the Compose plugin. Support `LINUX_CLI_DOCKER_APT_SOURCE=distro` for a distro-package fallback. Add Docker Fish aliases, but never run Docker prune or destructive cleanup automatically.
+On Debian/Ubuntu, prefer Docker's official apt repository for production-style hosts and install Docker Engine, CLI, containerd, Buildx, and the Compose plugin. Support `LINUX_CLI_DOCKER_APT_SOURCE=distro` for a distro-package fallback with `docker.io` and `docker-compose`. Add Docker Fish aliases, but never run Docker prune or destructive cleanup automatically.
 
 ### Desktop
 
@@ -225,6 +227,8 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 - Enable automatic NTP synchronization through chrony. Configure chrony to read DHCP-provided NTP servers from `/run/chrony-dhcp` and use `us.pool.ntp.org` as the public fallback pool. Install managed NetworkManager and dhclient hooks that write DHCP NTP servers into chrony's sourcedir, plus a tmpfiles entry that recreates the runtime directory after reboot. Disable `systemd-timesyncd` and remove the Debian/Ubuntu `systemd-timesyncd` package when present.
 - Install and enable fail2ban from core with a managed SSH jail that reads from the systemd journal and bans through UFW.
 - Install and configure logrotate from core for `/var/log/linux-cli-setup/*.log`.
+- The hardening section also installs managed sysctl protections, conservative OpenSSH daemon guardrails, and Debian apt settings that reject unauthenticated or insecure repositories.
+- The performance tuning section installs managed sysctl tuning for file watchers, file handles, cache pressure, dirty page writeback, service backlog, and MTU probing, and enables `fstrim.timer` when available.
 - Install `time-status` and `ntp-status` into `/usr/local/bin`.
 - Install regular files from `scripts/utilities/` into `/usr/local/bin` as root-owned executable utility commands. Uninstall should remove matching managed utility commands by comparing them against the repository copies and should back up changed local files instead of deleting them. The `aliases` utility must print all Fish abbreviations and aliases visible to the current user.
 - Install `/usr/local/sbin/linux-cli-auto-update` and `/etc/linux-cli-setup/auto-update.conf`.
@@ -232,7 +236,7 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 - A root `.auto-update.conf` may exist for local testing with real settings, but it must stay ignored by Git. The installed runtime config is still `/etc/linux-cli-setup/auto-update.conf`.
 - The automatic update scheduler should run daily between 3:30 AM and 4:30 AM. Prefer a systemd timer with `OnCalendar=03:30` plus `RandomizedDelaySec=1h`; fall back to `/etc/cron.d/linux-cli-auto-update` when systemd is unavailable.
 - Debian/Ubuntu auto-update uses `apt-get update`, `full-upgrade`, `autoremove`, and `autoclean`.
-- Arch auto-update uses `pacman -Syu --noconfirm` and may run `yay -Sua --noconfirm` as the configured `AUR_USER` when enabled.
+- Arch auto-update uses `pacman -Syu --noconfirm`.
 
 ## Security And Safety
 
@@ -251,9 +255,9 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 Before finishing installer changes, run the practical checks available in the current environment:
 
 ```bash
-for file in install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook; do bash -n "$file"; done
+for file in install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook; do bash -n "$file"; done
 for file in templates/fish/config.fish templates/fish/configure_tide.fish templates/fish/conf.d/linux-cli-motd.fish templates/fish/functions/*.fish; do fish -n "$file"; done
-shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook
+shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/linux-cli-auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook
 ./install.sh --list-profiles
 ./install.sh --help
 ./install.sh --version

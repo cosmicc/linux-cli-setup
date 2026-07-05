@@ -10,6 +10,7 @@ VERSION_FILE="$PROJECT_ROOT/VERSION"
 FISH_TEMPLATE_DIR="$PROJECT_ROOT/templates/fish"
 SSH_TEMPLATE_DIR="$PROJECT_ROOT/templates/ssh"
 SYSCTL_TEMPLATE_DIR="$PROJECT_ROOT/templates/sysctl"
+APT_TEMPLATE_DIR="$PROJECT_ROOT/templates/apt"
 MOTD_TEMPLATE="$PROJECT_ROOT/templates/motd/linux-cli-motd"
 AUTO_UPDATE_TEMPLATE_DIR="$PROJECT_ROOT/templates/auto-update"
 CHRONY_TEMPLATE_DIR="$PROJECT_ROOT/templates/chrony"
@@ -34,6 +35,8 @@ WIRELESS_FISH_FUNCTIONS=(wifi-connect wifi-info)
 SELECTED_PROFILES=()
 PROFILES_EXPLICIT=0
 PROFILE_POSITIONAL_ARGS=()
+SKIP_PERFORMANCE_TUNING="${LINUX_CLI_SKIP_PERFORMANCE:-0}"
+SKIP_HARDENING="${LINUX_CLI_SKIP_HARDENING:-0}"
 # INSTALL_MODE is set by setup-linux-cli.sh after this shared library is sourced.
 # shellcheck disable=SC2034
 INSTALL_MODE=install
@@ -790,6 +793,12 @@ parse_profile_selection() {
             --no-color|--no-colour)
                 USE_COLOR=0
                 ;;
+            --skip-performance|--skip-performance-tuning)
+                SKIP_PERFORMANCE_TUNING=1
+                ;;
+            --skip-hardening)
+                SKIP_HARDENING=1
+                ;;
             --)
                 shift
                 while [[ $# -gt 0 ]]; do
@@ -1023,32 +1032,12 @@ package_is_available() {
             if pacman -Si "$package" >/dev/null 2>&1; then
                 return 0
             fi
-            if command -v yay >/dev/null 2>&1 && yay -Si "$package" >/dev/null 2>&1; then
-                return 0
-            fi
-            if arch_package_available_in_aur_rpc "$package"; then
-                return 0
-            fi
             return 1
             ;;
         *)
             return 1
             ;;
     esac
-}
-
-arch_package_available_in_aur_rpc() {
-    local package="$1"
-
-    [[ "$package" =~ ^[A-Za-z0-9@._+-]+$ ]] || return 1
-    command -v curl >/dev/null 2>&1 || return 1
-
-    curl -fsSLG --connect-timeout 5 --max-time 10 \
-        --data-urlencode v=5 \
-        --data-urlencode type=info \
-        --data-urlencode "arg[]=$package" \
-        https://aur.archlinux.org/rpc/ |
-        grep -Eq '"resultcount":[[:space:]]*[1-9]'
 }
 
 test_package_availability_for_profiles() {
@@ -1133,15 +1122,8 @@ install_arch_package() {
         return 0
     fi
 
-    if [[ "$required" != "1" && -x "$(command -v yay 2>/dev/null || true)" ]]; then
-        if run_step_optional "${PACKAGE_STEP_VERB:-Installing}" "AUR package $package" run_as_target yay -S --needed --noconfirm "$package"; then
-            [[ "$was_installed" -eq 0 ]] && record_package_install_rollback "$package"
-            return 0
-        fi
-    fi
-
     [[ "$required" == "1" ]] && return 1
-    warn "Could not install optional Arch package '$package'. It may not be available in pacman or AUR."
+    warn "Could not install optional Arch package '$package'. It may not be available in pacman."
     return 0
 }
 
@@ -1248,36 +1230,6 @@ cleanup_unused_packages_and_cache() {
             warn "Unsupported package family for cleanup: $PACKAGE_FAMILY"
             ;;
     esac
-}
-
-ensure_yay_on_arch() {
-    if [[ "$PACKAGE_FAMILY" != "arch" ]]; then
-        return
-    fi
-
-    if command -v yay >/dev/null 2>&1; then
-        log "yay is already installed"
-        return
-    fi
-
-    log "Installing yay-bin from the Arch User Repository"
-    install_arch_required_packages base-devel git ca-certificates curl
-
-    local build_root
-    build_root="$(mktemp -d)"
-    chown "$TARGET_USER:$TARGET_GROUP" "$build_root"
-    record_rollback_cmd "rm -rf $(shell_quote "$build_root")"
-
-    run_step "Downloading" "yay-bin AUR repository" run_as_target git clone https://aur.archlinux.org/yay-bin.git "$build_root/yay-bin"
-    run_step "Building" "yay-bin package" run_as_target bash -lc "cd '$build_root/yay-bin' && makepkg -s --noconfirm"
-
-    local package_file
-    package_file="$(find "$build_root/yay-bin" -maxdepth 1 -type f -name 'yay-bin-*.pkg.tar.*' | head -n 1)"
-    [[ -n "$package_file" ]] || die "yay package build completed but no package file was found."
-
-    run_step "Installing" "yay-bin package" pacman -U --noconfirm "$package_file"
-    record_rollback_cmd "pacman -Rns --noconfirm yay-bin yay"
-    rm -rf "$build_root"
 }
 
 install_jetbrains_nerd_font_from_package_or_release() {
@@ -1459,10 +1411,83 @@ install_owned_file_optional() {
     return 0
 }
 
+reload_openssh_service_optional() {
+    if ! systemd_available; then
+        warn "systemd is unavailable; OpenSSH hardening was installed but not reloaded."
+        return 0
+    fi
+
+    if systemctl list-unit-files --no-legend ssh.service 2>/dev/null | grep -q '^ssh\.service'; then
+        run_step_optional "Reloading service" "ssh.service" systemctl reload ssh.service || true
+        return 0
+    fi
+
+    if systemctl list-unit-files --no-legend sshd.service 2>/dev/null | grep -q '^sshd\.service'; then
+        run_step_optional "Reloading service" "sshd.service" systemctl reload sshd.service || true
+        return 0
+    fi
+
+    warn "OpenSSH service unit was not found; hardening file was installed but the service was not reloaded."
+}
+
+sshd_binary() {
+    if command -v sshd >/dev/null 2>&1; then
+        command -v sshd
+        return 0
+    fi
+
+    if [[ -x /usr/sbin/sshd ]]; then
+        printf '/usr/sbin/sshd\n'
+        return 0
+    fi
+
+    return 1
+}
+
+configure_sshd_hardening() {
+    local sshd_template="$SSH_TEMPLATE_DIR/sshd_config.d/90-linux-cli-setup-hardening.conf"
+    local sshd_destination="/etc/ssh/sshd_config.d/90-linux-cli-setup-hardening.conf"
+    local sshd_command
+
+    log "Hardening: installing OpenSSH daemon guardrails"
+    if [[ ! -f "$sshd_template" ]]; then
+        warn "Missing OpenSSH hardening template: $sshd_template"
+        return 0
+    fi
+
+    install_owned_file_optional "$sshd_template" "$sshd_destination" 0644 root root
+
+    if ! sshd_command="$(sshd_binary)"; then
+        warn "OpenSSH daemon binary was not found; skipping sshd config validation."
+        return 0
+    fi
+
+    if run_step_optional "Validating" "OpenSSH daemon configuration" "$sshd_command" -t; then
+        reload_openssh_service_optional
+        return 0
+    fi
+
+    warn "Removing managed OpenSSH hardening snippet because sshd validation failed."
+    run_step_optional "Removing file" "$sshd_destination" rm -f "$sshd_destination" || true
+}
+
+configure_debian_apt_hardening() {
+    local apt_template="$APT_TEMPLATE_DIR/80-linux-cli-setup-hardening"
+
+    [[ "$PACKAGE_FAMILY" == "debian" ]] || return 0
+
+    log "Hardening: configuring apt to reject unauthenticated or insecure repositories"
+    if [[ -f "$apt_template" ]]; then
+        install_owned_file_optional "$apt_template" /etc/apt/apt.conf.d/80-linux-cli-setup-hardening 0644 root root
+    else
+        warn "Missing apt hardening template: $apt_template"
+    fi
+}
+
 apply_basic_os_hardening() {
     local sysctl_template="$SYSCTL_TEMPLATE_DIR/99-linux-cli-setup-hardening.conf"
 
-    log "Applying basic non-obtrusive OS hardening"
+    log "Hardening: applying kernel, filesystem, network, and login protections"
     if [[ -f "$sysctl_template" ]]; then
         install_owned_file_optional "$sysctl_template" /etc/sysctl.d/99-linux-cli-setup-hardening.conf 0644 root root
         run_step_optional "Applying" "sysctl hardening settings" sysctl --system || true
@@ -1472,6 +1497,52 @@ apply_basic_os_hardening() {
 
     [[ -d /tmp ]] && run_step_optional "Securing permissions" "/tmp" chmod 1777 /tmp || true
     [[ -d /var/tmp ]] && run_step_optional "Securing permissions" "/var/tmp" chmod 1777 /var/tmp || true
+    configure_sshd_hardening
+    configure_debian_apt_hardening
+}
+
+configure_hardening_section() {
+    if [[ "$SKIP_HARDENING" == "1" ]]; then
+        log "Skipping hardening section because --skip-hardening was provided."
+        return 0
+    fi
+
+    log "Hardening: configuring firewall, SSH protection, kernel protections, and safe package-manager defaults"
+    configure_ufw_firewall
+    configure_fail2ban
+    apply_basic_os_hardening
+}
+
+configure_performance_tuning() {
+    local sysctl_template="$SYSCTL_TEMPLATE_DIR/99-linux-cli-setup-performance.conf"
+
+    if [[ "$SKIP_PERFORMANCE_TUNING" == "1" ]]; then
+        log "Skipping performance tuning because --skip-performance was provided."
+        return 0
+    fi
+
+    log "Performance tuning: applying common kernel and filesystem settings"
+    case "$PACKAGE_FAMILY" in
+        debian)
+            log "Performance tuning (Debian): using managed sysctl settings and systemd fstrim when available."
+            ;;
+        arch)
+            log "Performance tuning (Arch): using managed sysctl settings and systemd fstrim when available."
+            ;;
+    esac
+
+    if [[ -f "$sysctl_template" ]]; then
+        install_owned_file_optional "$sysctl_template" /etc/sysctl.d/99-linux-cli-setup-performance.conf 0644 root root
+        run_step_optional "Applying" "sysctl performance settings" sysctl --system || true
+    else
+        warn "Missing performance sysctl template: $sysctl_template"
+    fi
+
+    if systemd_available && systemctl list-unit-files --no-legend fstrim.timer 2>/dev/null | grep -q '^fstrim\.timer'; then
+        run_step_optional "Enabling timer" "fstrim.timer" systemctl enable --now fstrim.timer || true
+    else
+        log "Performance tuning: fstrim.timer is unavailable; skipping periodic SSD trim enablement."
+    fi
 }
 
 configure_git_defaults() {
@@ -2075,7 +2146,6 @@ install_auto_update_config() {
 
     config_tmp="$(mktemp)"
     sed \
-        -e "s|^AUR_USER=.*|AUR_USER=\"${TARGET_USER}\"|" \
         -e "s|^PUSHOVER_USER_KEY=.*|PUSHOVER_USER_KEY=\"${PUSHOVER_USER_KEY:-}\"|" \
         -e "s|^PUSHOVER_API_TOKEN=.*|PUSHOVER_API_TOKEN=\"${PUSHOVER_API_TOKEN:-}\"|" \
         "$AUTO_UPDATE_TEMPLATE_DIR/auto-update.conf" > "$config_tmp"

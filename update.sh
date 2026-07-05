@@ -18,6 +18,8 @@ Options:
   --profile NAME[,NAME]   Refresh one or more groups in addition to core.
   --profiles NAME[,NAME]  Alias for --profile.
   --all-profiles          Refresh every supported group.
+  --skip-performance      Skip the default performance tuning section.
+  --skip-hardening        Skip the default hardening section.
   --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.

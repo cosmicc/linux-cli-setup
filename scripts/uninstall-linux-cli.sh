@@ -141,7 +141,6 @@ remove_auto_update_config() {
 
     default_config="$(mktemp)"
     sed \
-        -e "s|^AUR_USER=.*|AUR_USER=\"${TARGET_USER}\"|" \
         -e 's|^PUSHOVER_USER_KEY=.*|PUSHOVER_USER_KEY=""|' \
         -e 's|^PUSHOVER_API_TOKEN=.*|PUSHOVER_API_TOKEN=""|' \
         "$AUTO_UPDATE_TEMPLATE_DIR/auto-update.conf" > "$default_config"
@@ -167,7 +166,11 @@ remove_managed_files() {
         remove_file_if_managed_or_backup "$fish_config_dir/functions/$(basename "$function_template")" "$function_template"
     done < <(find "$FISH_TEMPLATE_DIR/functions" -maxdepth 1 -type f -name '*.fish' -print0)
     remove_file_if_managed_or_backup /etc/sysctl.d/99-linux-cli-setup-hardening.conf "$SYSCTL_TEMPLATE_DIR/99-linux-cli-setup-hardening.conf"
+    remove_file_if_managed_or_backup /etc/sysctl.d/99-linux-cli-setup-performance.conf "$SYSCTL_TEMPLATE_DIR/99-linux-cli-setup-performance.conf"
     run_step_optional "Applying" "remaining sysctl settings" sysctl --system || true
+    remove_file_if_managed_or_backup /etc/ssh/sshd_config.d/90-linux-cli-setup-hardening.conf "$SSH_TEMPLATE_DIR/sshd_config.d/90-linux-cli-setup-hardening.conf"
+    reload_openssh_service_optional
+    remove_file_if_managed_or_backup /etc/apt/apt.conf.d/80-linux-cli-setup-hardening "$APT_TEMPLATE_DIR/80-linux-cli-setup-hardening"
     remove_file_if_managed_or_backup "$ssh_dir/conf.d/00-defaults.conf" "$SSH_TEMPLATE_DIR/00-defaults.conf"
     if [[ -d "$ssh_dir/controlmasters" ]] && [[ -z "$(find "$ssh_dir/controlmasters" -mindepth 1 -print -quit)" ]]; then
         run_step_optional "Removing directory" "$ssh_dir/controlmasters" rmdir "$ssh_dir/controlmasters"

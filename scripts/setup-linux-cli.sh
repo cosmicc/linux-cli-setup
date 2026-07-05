@@ -22,6 +22,8 @@ Options:
   --profile NAME[,NAME]   Install one or more groups in addition to core.
   --profiles NAME[,NAME]  Alias for --profile.
   --all-profiles          Install every supported group.
+  --skip-performance      Skip the default performance tuning section.
+  --skip-hardening        Skip the default hardening section.
   --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.
@@ -126,17 +128,15 @@ main() {
     log "Selected profiles: $(selected_profiles_csv)"
 
     update_package_database_and_system
-    ensure_yay_on_arch
     sync_selected_profiles
     install_jetbrains_nerd_font_from_package_or_release
     enable_openssh_service
-    configure_ufw_firewall
-    configure_fail2ban
+    configure_hardening_section
     enable_arch_helpers
     configure_wireless_networking
     configure_time_sync
     configure_logrotate
-    apply_basic_os_hardening
+    configure_performance_tuning
     install_status_commands
     install_auto_update_service
     configure_git_defaults

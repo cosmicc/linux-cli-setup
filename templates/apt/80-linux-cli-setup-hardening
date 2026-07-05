@@ -1,0 +1,6 @@
+// Managed by linux-cli-setup.
+// Refuse unauthenticated or insecure apt repositories.
+
+APT::Get::AllowUnauthenticated "false";
+Acquire::AllowInsecureRepositories "false";
+Acquire::AllowDowngradeToInsecureRepositories "false";
