@@ -2,6 +2,33 @@ function fish_prompt
 end # In case this file gets loaded non-interactively, e.g by conda
 status is-interactive || exit
 
+# Keep login usable if Fisher/Tide did not finish installing its helper functions.
+set -l linux_cli_tide_required_functions \
+    _tide_remove_unusable_items \
+    _tide_cache_variables \
+    _tide_parent_dirs \
+    _tide_pwd \
+    _tide_1_line_prompt \
+    _tide_2_line_prompt
+
+for linux_cli_tide_function in $linux_cli_tide_required_functions
+    if not functions -q $linux_cli_tide_function
+        function fish_prompt
+            set -l last_status $status
+            set_color brblack
+            echo -n (prompt_pwd)
+            set_color normal
+            echo -n ' ❯ '
+            return $last_status
+        end
+
+        function fish_right_prompt
+        end
+
+        return 0
+    end
+end
+
 _tide_remove_unusable_items
 _tide_cache_variables
 _tide_parent_dirs
