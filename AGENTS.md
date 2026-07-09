@@ -22,7 +22,7 @@ This project provides root-run Linux setup, refresh, and uninstall scripts for C
 - `templates/sysctl/` contains managed sysctl hardening and performance templates.
 - `templates/ssh/sshd_config.d/` contains managed OpenSSH daemon hardening snippets.
 - `templates/apt/` contains managed Debian/Ubuntu apt hardening snippets.
-- `templates/motd/linux-cli-motd` contains the dynamic MOTD script installed on target systems.
+- `templates/motd/linux-cli-motd` contains the dynamic MOTD script installed on target systems, and `templates/motd/unifetch-motd.conf` contains the managed UniFetch MOTD config.
 - `templates/bin/` contains installed CLI status commands such as `time-status` and `ntp-status`.
 - `templates/auto-update/` contains the installed automatic update script and root-only config template.
 - `templates/systemd/` and `templates/cron/` contain automatic update scheduling templates.
@@ -102,7 +102,7 @@ Core always includes OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony
 | Disk usage | `ncdu`, `duf`, `dust` | `ncdu`, `duf` |
 | Logs | `lnav` | `lnav` |
 | Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tealdeer` |
-| System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
+| System info / MOTD | `fastfetch`, `unifetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | not packaged in Debian stable |
 | Time sync / SSH protection / log rotation | `chrony`, `fail2ban`, `logrotate` | `chrony`, `fail2ban`, `logrotate` |
 | Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
@@ -231,6 +231,7 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 - The performance tuning section installs managed sysctl tuning for file watchers, file handles, cache pressure, dirty page writeback, service backlog, and MTU probing, and enables `fstrim.timer` when available.
 - Install `time-status` and `ntp-status` into `/usr/local/bin`.
 - Install regular files from `scripts/utilities/` into `/usr/local/bin` as root-owned executable utility commands. Uninstall should remove matching managed utility commands by comparing them against the repository copies and should back up changed local files instead of deleting them. The `aliases` utility must print all Fish abbreviations and aliases visible to the current user. The `timecheck` utility must show chrony/NTP status, selected time source, and stratum; install `/usr/local/bin/ntpcheck` as a managed alias symlink to `timecheck`. The Docker utility is named `dockercheck`.
+- MOTD behavior is controlled by `--motd keep`, `--motd replace`, or `--motd combine`. `replace` is the noninteractive default and should hide existing MOTD entries before showing linux-cli-setup. `keep` should leave the existing login MOTD alone and remove linux-cli-setup login MOTD hooks. `combine` should show the existing MOTD first and linux-cli-setup afterward. If no MOTD option or `LINUX_CLI_MOTD_MODE` value is provided in an interactive install and no saved mode exists, prompt for the mode. Saved-profile refresh should reuse `motd_mode` from install state unless the user passes a new mode. The installed MOTD should prefer UniFetch with OS-matched ASCII art, local IP, public IP, package, CPU, GPU, memory, disk, user, and locale details when `unifetch` is available, then fall back to the built-in linux-cli-setup status block when it is unavailable or fails. Arch/Garuda may install optional UniFetch through pacman or yay/AUR. Debian/Ubuntu must not add a third-party UniFetch repository.
 - Install `/usr/local/bin/auto-update` and `/etc/auto-update.conf`. Install/refresh should migrate managed legacy paths from `/usr/local/sbin/linux-cli-auto-update` and `/etc/linux-cli-setup/auto-update.conf`.
 - Never commit real Pushover keys. The config template must contain placeholders only and the installed config must be root-only mode `0600`.
 - A root `.auto-update.conf` may exist for local testing with real settings, but it must stay ignored by Git. The installed runtime config is `/etc/auto-update.conf`.
@@ -255,9 +256,9 @@ Desktop is a small GUI workstation helper profile. Keep it focused on clipboard,
 Before finishing installer changes, run the practical checks available in the current environment:
 
 ```bash
-for file in install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook; do bash -n "$file"; done
+for file in install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/motd/unifetch-motd.conf templates/bin/time-status templates/bin/ntp-status templates/auto-update/auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook; do bash -n "$file"; done
 for file in templates/fish/config.fish templates/fish/configure_tide.fish templates/fish/conf.d/linux-cli-motd.fish templates/fish/functions/*.fish; do fish -n "$file"; done
-shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/bin/time-status templates/bin/ntp-status templates/auto-update/auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook
+shellcheck install.sh update.sh uninstall.sh install_test.sh scripts/setup-linux-cli.sh scripts/uninstall-linux-cli.sh scripts/install-test-linux-cli.sh scripts/lib/linux-cli-common.sh scripts/lib/package-install-overrides.sh scripts/utilities/* templates/motd/linux-cli-motd templates/motd/unifetch-motd.conf templates/bin/time-status templates/bin/ntp-status templates/auto-update/auto-update templates/auto-update/auto-update.conf templates/chrony/chrony-dhcp-source templates/chrony/networkmanager-dispatcher templates/chrony/dhclient-exit-hook
 ./install.sh --list-profiles
 ./install.sh --help
 ./install.sh --version

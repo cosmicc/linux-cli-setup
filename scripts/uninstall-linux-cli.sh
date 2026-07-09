@@ -99,25 +99,6 @@ restore_shell_if_needed() {
     fi
 }
 
-reenable_motd_snippets() {
-    local disabled_file
-    local motd_file
-
-    if [[ ! -d /etc/update-motd.d/.linux-cli-setup-disabled ]]; then
-        return
-    fi
-
-    while IFS= read -r -d '' disabled_file; do
-        while IFS= read -r motd_file; do
-            [[ -n "$motd_file" && -f "$motd_file" ]] || continue
-            log "Re-enabling MOTD snippet $motd_file"
-            run_step_optional "Re-enabling MOTD snippet" "$motd_file" chmod a+x "$motd_file"
-        done < "$disabled_file"
-    done < <(find /etc/update-motd.d/.linux-cli-setup-disabled -type f -name 'disabled-*.txt' -print0)
-
-    run_step_optional "Removing directory" "/etc/update-motd.d/.linux-cli-setup-disabled" rm -rf /etc/update-motd.d/.linux-cli-setup-disabled
-}
-
 remove_installed_utility_scripts() {
     local script_file
     local script_name
@@ -204,7 +185,9 @@ remove_managed_files() {
     run_step_optional "Removing file" "$AUTO_UPDATE_COMMAND" rm -f "$AUTO_UPDATE_COMMAND"
     run_step_optional "Removing file" "$LEGACY_AUTO_UPDATE_COMMAND" rm -f "$LEGACY_AUTO_UPDATE_COMMAND"
     remove_auto_update_config
-    run_step_optional "Removing file" "/etc/update-motd.d/50-linux-cli-setup" rm -f /etc/update-motd.d/50-linux-cli-setup
+    remove_file_if_managed_or_backup "$MOTD_UPDATE_SNIPPET" "$MOTD_TEMPLATE"
+    remove_file_if_managed_or_backup "$LEGACY_MOTD_UPDATE_SNIPPET" "$MOTD_TEMPLATE"
+    remove_unifetch_motd_config
     run_step_optional "Removing file" "/etc/fish/conf.d/linux-cli-motd.fish" rm -f /etc/fish/conf.d/linux-cli-motd.fish
     run_step_optional "Removing file" "/etc/systemd/system/linux-cli-auto-update.service" rm -f /etc/systemd/system/linux-cli-auto-update.service
     run_step_optional "Removing file" "/etc/systemd/system/linux-cli-auto-update.timer" rm -f /etc/systemd/system/linux-cli-auto-update.timer

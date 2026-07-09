@@ -24,6 +24,7 @@ Options:
   --all-profiles          Install every supported group.
   --skip-performance      Skip the default performance tuning section.
   --skip-hardening        Skip the default hardening section.
+  --motd MODE             MOTD behavior: keep, replace, or combine.
   --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.
@@ -32,7 +33,7 @@ Options:
 
 Environment:
   TARGET_USER=username                 Use when running directly as root.
-  LINUX_CLI_KEEP_DEFAULT_MOTD=1        Do not disable existing MOTD snippets.
+  LINUX_CLI_MOTD_MODE=MODE             MOTD behavior: keep, replace, or combine.
   LINUX_CLI_DOCKER_APT_SOURCE=distro   Use distro Docker packages instead of Docker's official apt repo.
   LINUX_CLI_ENABLE_CARGO_FALLBACKS=0   Skip cargo source-build fallbacks for comfort tools.
 
@@ -91,6 +92,7 @@ sync_selected_profiles() {
 }
 
 main() {
+    ENABLE_MOTD_OPTION=1
     parse_profile_selection 1 "$@"
 
     if [[ "${#PROFILE_POSITIONAL_ARGS[@]}" -gt 0 ]]; then
@@ -117,6 +119,7 @@ main() {
     register_transaction_traps
     init_runtime_context
     select_install_profiles
+    resolve_motd_mode
     if [[ "$INSTALL_MODE" == "update" ]]; then
         PACKAGE_STEP_VERB="Updating"
     else
@@ -127,6 +130,7 @@ main() {
     log "Detected package family: $PACKAGE_FAMILY"
     log "Target user: $TARGET_USER"
     log "Selected profiles: $(selected_profiles_csv)"
+    log "MOTD mode: $MOTD_MODE"
 
     update_package_database_and_system
     ensure_yay_on_arch
@@ -148,7 +152,7 @@ main() {
     set_default_shell
     install_motd
     cleanup_unused_packages_and_cache
-    write_install_state "$(selected_profiles_csv)" "$ORIGINAL_SHELL"
+    write_install_state "$(selected_profiles_csv)" "$ORIGINAL_SHELL" "$MOTD_MODE"
     commit_transaction
     clear_transaction_traps
 

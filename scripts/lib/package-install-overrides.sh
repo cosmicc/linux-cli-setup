@@ -338,7 +338,7 @@ suppress_static_motd() {
     local tmp_file
     local backup
 
-    [[ "${LINUX_CLI_KEEP_DEFAULT_MOTD:-0}" != "1" ]] || return 0
+    [[ "${MOTD_MODE:-replace}" == "replace" ]] || return 0
     [[ -e "$motd_path" ]] || return 0
 
     if [[ -L "$motd_path" ]]; then
@@ -396,21 +396,52 @@ restore_static_motd_if_managed() {
     run_step_optional "Removing file" "$STATIC_MOTD_BACKUP" rm -f "$STATIC_MOTD_BACKUP" || true
 }
 
+remove_linux_cli_motd_hooks() {
+    remove_file_if_managed_or_backup "$MOTD_UPDATE_SNIPPET" "$MOTD_TEMPLATE"
+    remove_file_if_managed_or_backup "$LEGACY_MOTD_UPDATE_SNIPPET" "$MOTD_TEMPLATE"
+    remove_file_if_managed_or_backup /etc/fish/conf.d/linux-cli-motd.fish "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish"
+}
+
 install_motd() {
+    case "${MOTD_MODE:-replace}" in
+        keep)
+            log "Keeping existing MOTD and removing linux-cli-setup login MOTD hooks."
+            reenable_motd_snippets
+            restore_static_motd_if_managed
+            remove_linux_cli_motd_hooks
+            remove_file_if_managed_or_backup /usr/local/bin/linux-cli-motd "$MOTD_TEMPLATE"
+            remove_unifetch_motd_config
+            return
+            ;;
+        combine)
+            log "Combining existing MOTD with linux-cli-setup dynamic status."
+            reenable_motd_snippets
+            restore_static_motd_if_managed
+            ;;
+        replace)
+            log "Replacing existing MOTD entries with linux-cli-setup dynamic status."
+            ;;
+        *)
+            die "Unknown MOTD mode '${MOTD_MODE:-}'. Use keep, replace, or combine."
+            ;;
+    esac
+
     log "Installing dynamic MOTD script"
+    install_unifetch_motd_config
     install_owned_file "$MOTD_TEMPLATE" /usr/local/bin/linux-cli-motd 0755 root root
 
     if [[ -d /etc/update-motd.d ]]; then
         local state_dir="/etc/update-motd.d/.linux-cli-setup-disabled"
         run_step "Creating directory" "$state_dir" mkdir -p "$state_dir"
 
-        log "Installing /etc/update-motd.d/50-linux-cli-setup"
-        install_owned_file "$MOTD_TEMPLATE" /etc/update-motd.d/50-linux-cli-setup 0755 root root
+        log "Installing $MOTD_UPDATE_SNIPPET"
+        install_owned_file "$MOTD_TEMPLATE" "$MOTD_UPDATE_SNIPPET" 0755 root root
+        remove_file_if_managed_or_backup "$LEGACY_MOTD_UPDATE_SNIPPET" "$MOTD_TEMPLATE"
 
-        if [[ "${LINUX_CLI_KEEP_DEFAULT_MOTD:-0}" != "1" ]]; then
-            log "Disabling other executable update-motd snippets; set LINUX_CLI_KEEP_DEFAULT_MOTD=1 to keep them enabled"
+        if [[ "${MOTD_MODE:-replace}" == "replace" ]]; then
+            log "Disabling other executable update-motd snippets; use --motd combine to keep them enabled"
             while IFS= read -r -d '' motd_file; do
-                [[ "$(basename "$motd_file")" == "50-linux-cli-setup" ]] && continue
+                [[ "$motd_file" == "$MOTD_UPDATE_SNIPPET" ]] && continue
                 run_step "Disabling MOTD snippet" "$motd_file" chmod a-x "$motd_file"
                 record_rollback_cmd "chmod a+x $(shell_quote "$motd_file")"
                 printf '%s\n' "$motd_file" >> "$state_dir/disabled-${TIMESTAMP}.txt"

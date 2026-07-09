@@ -12,6 +12,12 @@ SSH_TEMPLATE_DIR="$PROJECT_ROOT/templates/ssh"
 SYSCTL_TEMPLATE_DIR="$PROJECT_ROOT/templates/sysctl"
 APT_TEMPLATE_DIR="$PROJECT_ROOT/templates/apt"
 MOTD_TEMPLATE="$PROJECT_ROOT/templates/motd/linux-cli-motd"
+UNIFETCH_MOTD_CONFIG_TEMPLATE="$PROJECT_ROOT/templates/motd/unifetch-motd.conf"
+UNIFETCH_MOTD_CONFIG="/usr/local/share/linux-cli-setup/unifetch-motd.conf"
+# shellcheck disable=SC2034 # Used by scripts sourced after this shared library.
+MOTD_UPDATE_SNIPPET="/etc/update-motd.d/99-linux-cli-setup"
+# shellcheck disable=SC2034 # Used by scripts sourced after this shared library.
+LEGACY_MOTD_UPDATE_SNIPPET="/etc/update-motd.d/50-linux-cli-setup"
 AUTO_UPDATE_TEMPLATE_DIR="$PROJECT_ROOT/templates/auto-update"
 CHRONY_TEMPLATE_DIR="$PROJECT_ROOT/templates/chrony"
 FAIL2BAN_TEMPLATE_DIR="$PROJECT_ROOT/templates/fail2ban"
@@ -40,6 +46,9 @@ PROFILES_EXPLICIT=0
 PROFILE_POSITIONAL_ARGS=()
 SKIP_PERFORMANCE_TUNING="${LINUX_CLI_SKIP_PERFORMANCE:-0}"
 SKIP_HARDENING="${LINUX_CLI_SKIP_HARDENING:-0}"
+MOTD_MODE=""
+MOTD_MODE_EXPLICIT=0
+ENABLE_MOTD_OPTION=0
 # INSTALL_MODE is set by setup-linux-cli.sh after this shared library is sourced.
 # shellcheck disable=SC2034
 INSTALL_MODE=install
@@ -640,6 +649,85 @@ read_state_value() {
     awk -F= -v key="$key" '$1 == key { value = substr($0, index($0, "=") + 1) } END { if (value != "") print value }' "$STATE_FILE"
 }
 
+validate_motd_mode() {
+    case "$1" in
+        keep|replace|combine)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+set_motd_mode() {
+    local mode="$1"
+
+    validate_motd_mode "$mode" || die "Unknown MOTD mode '$mode'. Use keep, replace, or combine."
+    MOTD_MODE="$mode"
+    MOTD_MODE_EXPLICIT=1
+    export MOTD_MODE
+}
+
+prompt_for_motd_mode() {
+    local answer
+
+    console_line cyan "[linux-cli-setup] Choose MOTD behavior:"
+    console_line cyan "  1) replace  Hide existing MOTD entries and show linux-cli-setup only."
+    console_line cyan "  2) keep     Leave the existing MOTD alone and do not show linux-cli-setup."
+    console_line cyan "  3) combine  Show the existing MOTD first, then linux-cli-setup."
+    printf '[linux-cli-setup] MOTD mode [replace]: '
+    read -r answer
+
+    case "${answer,,}" in
+        ""|1|r|replace)
+            MOTD_MODE=replace
+            ;;
+        2|k|keep)
+            MOTD_MODE=keep
+            ;;
+        3|c|combine)
+            MOTD_MODE=combine
+            ;;
+        *)
+            die "Unknown MOTD selection '$answer'. Use 1, 2, 3, keep, replace, or combine."
+            ;;
+    esac
+}
+
+resolve_motd_mode() {
+    local saved_motd_mode
+
+    if [[ "$MOTD_MODE_EXPLICIT" -eq 1 ]]; then
+        export MOTD_MODE
+        return
+    fi
+
+    if [[ -n "${LINUX_CLI_MOTD_MODE:-}" ]]; then
+        set_motd_mode "$LINUX_CLI_MOTD_MODE"
+        return
+    fi
+
+    saved_motd_mode="$(read_state_value motd_mode || true)"
+    if [[ -n "$saved_motd_mode" ]]; then
+        if validate_motd_mode "$saved_motd_mode"; then
+            MOTD_MODE="$saved_motd_mode"
+        else
+            warn "Ignoring invalid saved MOTD mode '$saved_motd_mode'; using replace."
+            MOTD_MODE=replace
+        fi
+        export MOTD_MODE
+        return
+    fi
+
+    if [[ -t 0 ]]; then
+        prompt_for_motd_mode
+    else
+        MOTD_MODE=replace
+    fi
+    export MOTD_MODE
+}
+
 install_state_exists() {
     [[ -f "$STATE_FILE" ]]
 }
@@ -862,6 +950,23 @@ parse_profile_selection() {
             --skip-hardening)
                 SKIP_HARDENING=1
                 ;;
+            --motd=*)
+                if [[ "$ENABLE_MOTD_OPTION" -eq 1 ]]; then
+                    set_motd_mode "${1#*=}"
+                else
+                    PROFILE_POSITIONAL_ARGS+=("$1")
+                fi
+                ;;
+            --motd)
+                if [[ "$ENABLE_MOTD_OPTION" -eq 1 ]]; then
+                    local option="$1"
+                    shift
+                    [[ $# -gt 0 ]] || die "$option requires keep, replace, or combine."
+                    set_motd_mode "$1"
+                else
+                    PROFILE_POSITIONAL_ARGS+=("$1")
+                fi
+                ;;
             --)
                 shift
                 while [[ $# -gt 0 ]]; do
@@ -908,6 +1013,7 @@ state_profiles() {
 write_install_state() {
     local profiles_csv="$1"
     local original_shell="$2"
+    local motd_mode="${3:-}"
     local stored_original_shell
     local state_backup=""
 
@@ -931,6 +1037,7 @@ write_install_state() {
         printf 'package_family=%s\n' "$PACKAGE_FAMILY"
         printf 'profiles=%s\n' "$profiles_csv"
         printf 'original_shell=%s\n' "$original_shell"
+        printf 'motd_mode=%s\n' "${motd_mode:-replace}"
         printf 'updated_at=%s\n' "$(date -Iseconds)"
     } > "$STATE_FILE"
     chmod 0644 "$STATE_FILE"
@@ -1903,21 +2010,72 @@ set_default_shell() {
     fi
 }
 
+reenable_motd_snippets() {
+    local disabled_file
+    local motd_file
+
+    if [[ ! -d /etc/update-motd.d/.linux-cli-setup-disabled ]]; then
+        return
+    fi
+
+    while IFS= read -r -d '' disabled_file; do
+        while IFS= read -r motd_file; do
+            [[ -n "$motd_file" && -f "$motd_file" ]] || continue
+            log "Re-enabling MOTD snippet $motd_file"
+            run_step_optional "Re-enabling MOTD snippet" "$motd_file" chmod a+x "$motd_file"
+        done < "$disabled_file"
+    done < <(find /etc/update-motd.d/.linux-cli-setup-disabled -type f -name 'disabled-*.txt' -print0)
+
+    run_step_optional "Removing directory" "/etc/update-motd.d/.linux-cli-setup-disabled" rm -rf /etc/update-motd.d/.linux-cli-setup-disabled
+}
+
+install_unifetch_motd_config() {
+    log "Installing UniFetch MOTD configuration"
+    install_owned_file "$UNIFETCH_MOTD_CONFIG_TEMPLATE" "$UNIFETCH_MOTD_CONFIG" 0644 root root
+}
+
+remove_unifetch_motd_config() {
+    local config_dir
+
+    remove_file_if_managed_or_backup "$UNIFETCH_MOTD_CONFIG" "$UNIFETCH_MOTD_CONFIG_TEMPLATE"
+    config_dir="$(dirname "$UNIFETCH_MOTD_CONFIG")"
+    if [[ -d "$config_dir" && -z "$(find "$config_dir" -mindepth 1 -print -quit)" ]]; then
+        run_step_optional "Removing directory" "$config_dir" rmdir "$config_dir"
+    fi
+}
+
 install_motd() {
+    if [[ "${MOTD_MODE:-replace}" == "keep" ]]; then
+        log "Keeping existing MOTD and skipping linux-cli-setup login MOTD hooks."
+        reenable_motd_snippets
+        remove_file_if_managed_or_backup "$MOTD_UPDATE_SNIPPET" "$MOTD_TEMPLATE"
+        remove_file_if_managed_or_backup "$LEGACY_MOTD_UPDATE_SNIPPET" "$MOTD_TEMPLATE"
+        remove_file_if_managed_or_backup /etc/fish/conf.d/linux-cli-motd.fish "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish"
+        remove_file_if_managed_or_backup /usr/local/bin/linux-cli-motd "$MOTD_TEMPLATE"
+        remove_unifetch_motd_config
+        return
+    fi
+
+    if [[ "${MOTD_MODE:-replace}" == "combine" ]]; then
+        reenable_motd_snippets
+    fi
+
     log "Installing dynamic MOTD script"
+    install_unifetch_motd_config
     install_owned_file "$MOTD_TEMPLATE" /usr/local/bin/linux-cli-motd 0755 root root
 
     if [[ -d /etc/update-motd.d ]]; then
         local state_dir="/etc/update-motd.d/.linux-cli-setup-disabled"
         run_step "Creating directory" "$state_dir" mkdir -p "$state_dir"
 
-        log "Installing /etc/update-motd.d/50-linux-cli-setup"
-        install_owned_file "$MOTD_TEMPLATE" /etc/update-motd.d/50-linux-cli-setup 0755 root root
+        log "Installing $MOTD_UPDATE_SNIPPET"
+        install_owned_file "$MOTD_TEMPLATE" "$MOTD_UPDATE_SNIPPET" 0755 root root
+        remove_file_if_managed_or_backup "$LEGACY_MOTD_UPDATE_SNIPPET" "$MOTD_TEMPLATE"
 
-        if [[ "${LINUX_CLI_KEEP_DEFAULT_MOTD:-0}" != "1" ]]; then
-            log "Disabling other executable update-motd snippets; set LINUX_CLI_KEEP_DEFAULT_MOTD=1 to keep them enabled"
+        if [[ "${MOTD_MODE:-replace}" == "replace" ]]; then
+            log "Disabling other executable update-motd snippets; use --motd combine to keep them enabled"
             while IFS= read -r -d '' motd_file; do
-                [[ "$(basename "$motd_file")" == "50-linux-cli-setup" ]] && continue
+                [[ "$motd_file" == "$MOTD_UPDATE_SNIPPET" ]] && continue
                 run_step "Disabling MOTD snippet" "$motd_file" chmod a-x "$motd_file"
                 record_rollback_cmd "chmod a+x $(shell_quote "$motd_file")"
                 printf '%s\n' "$motd_file" >> "$state_dir/disabled-${TIMESTAMP}.txt"

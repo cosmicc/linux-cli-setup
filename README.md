@@ -40,7 +40,7 @@ sudo ./install.sh --all-profiles
 
 Package names are read from [data/package-groups.yaml](data/package-groups.yaml). Edit that file to change which Arch or Debian/Ubuntu packages belong to each group. The YAML file keeps package names as one-per-line lists so manual edits are easier to review than the old tab-delimited map.
 
-Package status lines show the owning profile for package actions, such as `core/curl` or `netops/nmap`. Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
+Package status lines show the owning profile for package actions, such as `core/curl` or `netops/nmap`. Use `--motd keep`, `--motd replace`, or `--motd combine` to choose login MOTD behavior. Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
 Performance tuning and hardening are enabled by default. Use `--skip-performance` or `--skip-hardening` when you need to leave those settings untouched for a specific host.
 
 Before install, saved-profile refresh, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is. If an install, refresh, or uninstall fails, exits nonzero, or is interrupted with Ctrl+C or a termination signal, the active transaction rolls back before the script exits and skips over rollback errors so cleanup can continue.
@@ -70,7 +70,7 @@ Available profiles:
 
 ## Core Install
 
-The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony, fail2ban, logrotate, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt with rounded left and right status segments, including Git status, long-command duration, and project/toolchain indicators when Tide detects them, and a dynamic MOTD. Rerunning install refreshes the Tide settings and managed prompt file. The installer lets Fisher install Tide first, verifies Tide helpers, and then reapplies the managed prompt. If Tide helper functions are missing, the managed prompt falls back to a basic Fish prompt instead of printing login errors. The managed Fisher plugin set installed by default is Fisher, Tide, fzf.fish, autopair.fish, bass, and done.
+The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony, fail2ban, logrotate, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt with rounded left and right status segments, including Git status, long-command duration, and project/toolchain indicators when Tide detects them, and a dynamic MOTD. The MOTD prefers UniFetch when available and falls back to the built-in linux-cli-setup status block when it is not. Rerunning install refreshes the Tide settings and managed prompt file. The installer lets Fisher install Tide first, verifies Tide helpers, and then reapplies the managed prompt. If Tide helper functions are missing, the managed prompt falls back to a basic Fish prompt instead of printing login errors. The managed Fisher plugin set installed by default is Fisher, Tide, fzf.fish, autopair.fish, bass, and done.
 
 It also adds common CLI tools:
 
@@ -88,7 +88,7 @@ It also adds common CLI tools:
 | Disk usage | `ncdu`, `duf`, `dust` | `ncdu`, `duf` |
 | Logs | `lnav` | `lnav` |
 | Docs / help | `man-db`, `man-pages`, `tldr` | `man-db`, `manpages`, `tealdeer` |
-| System info | `fastfetch`, `inxi` | `fastfetch`, `inxi` |
+| System info / MOTD | `fastfetch`, `unifetch`, `inxi` | `fastfetch`, `inxi` |
 | Dotfiles | `chezmoi` | not packaged in Debian stable |
 | Time sync / SSH protection / log rotation | `chrony`, `fail2ban`, `logrotate` | `chrony`, `fail2ban`, `logrotate` |
 | Security audit / integrity | `lynis`, `aide` | `lynis`, `aide` |
@@ -96,7 +96,7 @@ It also adds common CLI tools:
 | System and network monitors | `glances`, `atop`, `dool`, `vnstat`, `bmon` | `glances`, `atop`, `vnstat`, `bmon` |
 | Nerd Font package | `ttf-jetbrains-mono-nerd` | installed from Nerd Fonts release fallback |
 
-Recommended package rows are best-effort. On Arch, the installer checks pacman first and falls back to yay/AUR for optional tools such as `aide` when needed. Docker's Debian/Ubuntu profile can add Docker's official apt repository before installing Docker Engine packages.
+Recommended package rows are best-effort. On Arch, the installer checks pacman first and falls back to yay/AUR for optional tools such as `aide` and `unifetch` when needed. Docker's Debian/Ubuntu profile can add Docker's official apt repository before installing Docker Engine packages.
 
 The installer configures UFW with a default deny incoming policy, default allow outgoing policy, and explicit inbound allowances for SSH, iperf3 on port `5201` TCP/UDP, and ICMP echo-request ping. It does not reset pre-existing UFW rules.
 
@@ -317,13 +317,19 @@ On systemd hosts, the installer enables `linux-cli-auto-update.timer`. It runs d
 
 ## MOTD Behavior
 
-On systems with `/etc/update-motd.d`, the installer adds `50-linux-cli-setup` and disables other executable MOTD snippets so the login view stays clean. To keep existing distro MOTD snippets enabled, run:
+The installer supports three MOTD modes:
 
 ```bash
-sudo LINUX_CLI_KEEP_DEFAULT_MOTD=1 ./install.sh
+sudo ./install.sh --motd replace
+sudo ./install.sh --motd keep
+sudo ./install.sh --motd combine
 ```
 
-On systems without `/etc/update-motd.d`, the installer adds a Fish login hook under `/etc/fish/conf.d/`.
+`replace` is the noninteractive default and hides existing MOTD entries so the linux-cli-setup dynamic status is shown by itself. `keep` leaves the existing MOTD alone and removes linux-cli-setup login MOTD hooks. `combine` shows the existing MOTD first, then the linux-cli-setup dynamic status block. If no MOTD option is provided in an interactive run and no saved MOTD mode exists, the installer asks which mode to use.
+
+For replace and combine modes, the installed MOTD command uses UniFetch with OS-matched ASCII art, local IP, public IP, package, CPU, GPU, memory, disk, user, and locale details when `unifetch` is installed. If UniFetch is unavailable or fails, it falls back to the built-in linux-cli-setup status block. Arch/Garuda installs try `unifetch` as an optional core package through pacman or yay/AUR. Debian/Ubuntu installs do not add a third-party UniFetch repository; they use UniFetch only when the command already exists.
+
+On systems with `/etc/update-motd.d`, the installer uses `99-linux-cli-setup` so combined MOTD output appears after existing distro entries. On systems without `/etc/update-motd.d`, replace and combine modes use a Fish login hook under `/etc/fish/conf.d/`. `LINUX_CLI_MOTD_MODE=keep|replace|combine` is also supported.
 
 ## Notes
 

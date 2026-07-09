@@ -20,6 +20,7 @@ Options:
   --all-profiles          Refresh every supported group.
   --skip-performance      Skip the default performance tuning section.
   --skip-hardening        Skip the default hardening section.
+  --motd MODE             MOTD behavior: keep, replace, or combine.
   --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.

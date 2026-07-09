@@ -78,6 +78,7 @@ package_groups:
       - man-pages
       - tldr
       - fastfetch
+      - unifetch
       - inxi
       - git-delta
       - pacman-contrib

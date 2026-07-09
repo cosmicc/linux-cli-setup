@@ -1,9 +1,26 @@
 #!/usr/bin/env bash
 #
-# Dynamic login MOTD installed by linux-cli-setup. It intentionally reports only
-# host health basics and avoids application/database-specific monitors.
+# Dynamic login MOTD installed by linux-cli-setup. It prefers UniFetch when
+# available so login output can show OS-matched ASCII art and a richer host
+# summary. If UniFetch is missing or fails, this script falls back to a compact
+# built-in status block.
 
 set -euo pipefail
+
+UNIFETCH_CONFIG="/usr/local/share/linux-cli-setup/unifetch-motd.conf"
+PUBLIC_IP_URL="https://api.ipify.org"
+PUBLIC_IP_TIMEOUT=2
+
+run_unifetch_motd() {
+    command -v unifetch >/dev/null 2>&1 || return 1
+    [[ -r "$UNIFETCH_CONFIG" ]] || return 1
+
+    unifetch \
+        --config "$UNIFETCH_CONFIG" \
+        --ascii_distro auto \
+        --ip_host "$PUBLIC_IP_URL" \
+        --ip_timeout "$PUBLIC_IP_TIMEOUT"
+}
 
 separator() {
     printf '%*s\n' 78 '' | tr ' ' '='
@@ -37,6 +54,25 @@ ip_summary() {
             awk '{ split($4, ip, "/"); output = output ? output ", " ip[1] : ip[1] } END { print output }'
     )"
     printf '%s' "${addresses:-unavailable}"
+}
+
+public_ip_summary() {
+    local address=""
+
+    if command -v curl >/dev/null 2>&1; then
+        address="$(curl -fsSL --max-time "$PUBLIC_IP_TIMEOUT" "$PUBLIC_IP_URL" 2>/dev/null || true)"
+    elif command -v wget >/dev/null 2>&1; then
+        address="$(wget -qO- -T "$PUBLIC_IP_TIMEOUT" "$PUBLIC_IP_URL" 2>/dev/null || true)"
+    fi
+
+    address="${address//$'\r'/}"
+    address="${address//$'\n'/}"
+    if [[ "$address" =~ ^[0-9A-Fa-f:.]+$ ]]; then
+        printf '%s' "$address"
+        return
+    fi
+
+    printf 'unavailable'
 }
 
 reboot_required() {
@@ -78,6 +114,10 @@ ssh_status() {
     printf '%s' "$status"
 }
 
+if run_unifetch_motd; then
+    exit 0
+fi
+
 host_name="$(hostname 2>/dev/null || printf 'linux-host')"
 load_average="$(cut -d' ' -f1-3 /proc/loadavg)"
 
@@ -89,7 +129,8 @@ printf '  %-13s %s\n' 'Kernel:' "$(uname -r)"
 printf '  %-13s %s\n' 'Load Avg:' "$load_average"
 printf '  %-13s %s\n' 'Memory:' "$(memory_summary)"
 printf '  %-13s %s\n' 'Root Disk:' "$(root_disk_summary)"
-printf '  %-13s %s\n' 'IP Address:' "$(ip_summary)"
+printf '  %-13s %s\n' 'Local IP:' "$(ip_summary)"
+printf '  %-13s %s\n' 'Public IP:' "$(public_ip_summary)"
 section_separator
 printf '  ssh: %s\n' "$(ssh_status)"
 section_separator
