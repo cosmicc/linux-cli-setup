@@ -219,6 +219,63 @@ install_custom_fish_prompt() {
     install_owned_file "$prompt_template" "$fish_config_dir/functions/fish_prompt.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
 }
 
+fish_plugin_is_registered() {
+    local plugin_name="$1"
+
+    run_as_target fish -lc "functions -q fisher; and fisher list | string match -q -- '$plugin_name'" >/dev/null 2>&1
+}
+
+prepare_fisher_conflict_file() {
+    local conflict_path="$1"
+    local description="$2"
+    local managed_template="${3:-}"
+
+    [[ -e "$conflict_path" || -L "$conflict_path" ]] || return 0
+
+    if [[ -n "$managed_template" && -f "$managed_template" ]] && cmp -s "$managed_template" "$conflict_path"; then
+        log "Removing managed $description before Fisher plugin installation."
+        record_rollback_cmd "install -o $(shell_quote "$TARGET_USER") -g $(shell_quote "$TARGET_GROUP") -m 0644 $(shell_quote "$managed_template") $(shell_quote "$conflict_path")"
+        run_step "Removing managed conflict" "$conflict_path" rm -f "$conflict_path"
+        return 0
+    fi
+
+    warn "$conflict_path conflicts with managed Fisher plugin installation; backing it up before continuing."
+    backup_existing_path "$conflict_path"
+}
+
+prepare_fisher_plugin_conflicts() {
+    local fish_config_dir="$TARGET_HOME/.config/fish"
+    local prompt_template="$FISH_TEMPLATE_DIR/functions/fish_prompt.fish"
+
+    if ! fish_plugin_is_registered "IlanCosman/tide@v6" && ! fish_plugin_is_registered "ilancosman/tide@v6"; then
+        prepare_fisher_conflict_file "$fish_config_dir/functions/fish_prompt.fish" "Tide prompt file" "$prompt_template"
+    fi
+
+    if ! fish_plugin_is_registered "franciscolourenco/done"; then
+        prepare_fisher_conflict_file "$fish_config_dir/conf.d/done.fish" "done plugin hook"
+    fi
+}
+
+verify_tide_helpers_installed() {
+    # shellcheck disable=SC2016
+    run_step "Verifying" "Tide Fish helpers" run_as_target fish -lc '
+set -l required_tide_helpers \
+    _tide_remove_unusable_items \
+    _tide_cache_variables \
+    _tide_parent_dirs \
+    _tide_pwd \
+    _tide_1_line_prompt \
+    _tide_2_line_prompt
+
+for helper in $required_tide_helpers
+    if not functions -q $helper
+        echo "Missing Tide helper function: $helper" >&2
+        exit 1
+    end
+end
+'
+}
+
 configure_fish_files() {
     local config_root="$TARGET_HOME/.config"
     local fish_config_dir="$config_root/fish"
@@ -235,7 +292,6 @@ configure_fish_files() {
 
     install_owned_file "$FISH_TEMPLATE_DIR/config.fish" "$fish_config_dir/config.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
     install_owned_file "$FISH_TEMPLATE_DIR/fish_plugins" "$fish_config_dir/fish_plugins" 0644 "$TARGET_USER" "$TARGET_GROUP"
-    install_custom_fish_prompt
 
     if profile_is_selected comfort; then
         install_fish_function_templates "${COMFORT_FISH_FUNCTIONS[@]}"
@@ -251,7 +307,9 @@ install_fisher_plugins() {
     plugin_list="$(grep -Ev '^[[:space:]]*(#|$)' "$FISH_TEMPLATE_DIR/fish_plugins" | tr '\n' ' ')"
 
     log "Installing or updating Fisher and Fish plugins for $TARGET_USER"
-    run_step "Installing" "Fisher and Fish plugins" run_as_target fish -lc "curl -fsSL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher install jorgebucaran/fisher; and fisher install $plugin_list"
+    prepare_fisher_plugin_conflicts
+    run_step "Installing" "Fisher and Fish plugins" run_as_target fish -lc "curl -fsSL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher install $plugin_list"
+    verify_tide_helpers_installed
 
     log "Applying Tide prompt settings"
     run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
@@ -268,7 +326,9 @@ update_fisher_plugins() {
 
     log "Updating Fisher plugins for $TARGET_USER"
     plugin_list="$(grep -Ev '^[[:space:]]*(#|$)' "$FISH_TEMPLATE_DIR/fish_plugins" | tr '\n' ' ')"
-    run_step "Updating" "Fisher plugins" run_as_target fish -lc "if functions -q fisher; fisher install $plugin_list; and fisher update; else exit 0; end"
+    prepare_fisher_plugin_conflicts
+    run_step "Updating" "Fisher plugins" run_as_target fish -lc "if functions -q fisher; fisher install $plugin_list; and fisher update; else curl -fsSL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher install $plugin_list; end"
+    verify_tide_helpers_installed
     run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
     install_custom_fish_prompt
 }

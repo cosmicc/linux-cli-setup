@@ -70,7 +70,7 @@ Available profiles:
 
 ## Core Install
 
-The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony, fail2ban, logrotate, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt with rounded left and right status segments, including Git status, long-command duration, and project/toolchain indicators when Tide detects them, and a dynamic MOTD. Rerunning install refreshes the Tide settings and managed prompt file. If Tide helper functions are missing, the managed prompt falls back to a basic Fish prompt instead of printing login errors. The managed Fisher plugin set installed by default is Fisher, Tide, fzf.fish, autopair.fish, bass, and done.
+The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony, fail2ban, logrotate, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt with rounded left and right status segments, including Git status, long-command duration, and project/toolchain indicators when Tide detects them, and a dynamic MOTD. Rerunning install refreshes the Tide settings and managed prompt file. The installer lets Fisher install Tide first, verifies Tide helpers, and then reapplies the managed prompt. If Tide helper functions are missing, the managed prompt falls back to a basic Fish prompt instead of printing login errors. The managed Fisher plugin set installed by default is Fisher, Tide, fzf.fish, autopair.fish, bass, and done.
 
 It also adds common CLI tools:
 
