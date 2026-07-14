@@ -37,6 +37,7 @@ LOG_DIR="/var/log/linux-cli-setup"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 EXPECTED_GITHUB_REPO="${LINUX_CLI_SELF_UPDATE_REPO:-cosmicc/linux-cli-setup}"
 SELF_UPDATE_BRANCH="${LINUX_CLI_SELF_UPDATE_BRANCH:-main}"
+SELF_UPDATE_CHECK_TIMEOUT_SECONDS=10
 
 SUPPORTED_PROFILES=(core comfort dev netops wireless storage diagnostics docker desktop)
 COMFORT_FISH_FUNCTIONS=(mkcd extract dnscheck certcheck serve jfu scs)
@@ -55,6 +56,7 @@ INSTALL_MODE=install
 DEBUG=0
 USE_COLOR=1
 LOG_FILE=""
+LOG_LOCATION_REPORTED=0
 CURRENT_STEP_OUTPUT=""
 ROLLBACK_FILE=""
 ROLLBACK_ENABLED=0
@@ -122,7 +124,16 @@ die() {
     error "$*"
     show_step_tail
     rollback_changes
+    report_log_location
     exit 1
+}
+
+report_log_location() {
+    [[ -n "${LOG_FILE:-}" ]] || return 0
+    [[ "${LOG_LOCATION_REPORTED:-0}" -eq 0 ]] || return 0
+
+    LOG_LOCATION_REPORTED=1
+    console_line cyan "[linux-cli-setup] Log saved to $LOG_FILE"
 }
 
 init_logging() {
@@ -133,6 +144,7 @@ init_logging() {
     touch "$LOG_FILE"
     chmod 0644 "$LOG_FILE"
     log "Logging to $LOG_FILE"
+    trap report_log_location EXIT
 }
 
 init_logging_with_user_fallback() {
@@ -287,6 +299,7 @@ transaction_signal_trap() {
     error "Received $signal_name; rolling back changes before exiting."
     show_step_tail
     rollback_changes
+    report_log_location
     exit "$exit_code"
 }
 
@@ -312,15 +325,20 @@ transaction_error_trap() {
     error "Script failed with exit code $rc."
     show_step_tail
     rollback_changes
+    report_log_location
     exit "$rc"
 }
 
 transaction_exit_trap() {
     local rc=$?
 
-    [[ "$rc" -eq 0 ]] && return 0
+    if [[ "$rc" -eq 0 ]]; then
+        report_log_location
+        return 0
+    fi
     if [[ "$TRANSACTION_EXIT_HANDLED" -ne 0 || "$ROLLBACK_ENABLED" -ne 1 ]]; then
         trap - ERR EXIT HUP INT QUIT TERM
+        report_log_location
         exit "$rc"
     fi
 
@@ -329,6 +347,7 @@ transaction_exit_trap() {
     error "Script exited with code $rc; rolling back changes before exiting."
     show_step_tail
     rollback_changes
+    report_log_location
     exit "$rc"
 }
 
@@ -338,7 +357,7 @@ project_version() {
         return
     fi
 
-    printf '0.4a'
+    printf '0.5b'
 }
 
 print_version() {
@@ -453,11 +472,19 @@ self_update_command() {
     "$@"
 }
 
+self_update_check_command() {
+    self_update_command timeout \
+        --signal=TERM \
+        --kill-after=2s \
+        "${SELF_UPDATE_CHECK_TIMEOUT_SECONDS}s" \
+        "$@"
+}
+
 release_tags_from_github_cli() {
     local repo_slug="$1"
 
     command -v gh >/dev/null 2>&1 || return 1
-    self_update_command gh release list \
+    self_update_check_command gh release list \
         --repo "$repo_slug" \
         --limit 100 \
         --json tagName,isDraft \
@@ -467,7 +494,7 @@ release_tags_from_github_cli() {
 release_tags_from_git_remote() {
     local remote="$1"
 
-    self_update_command git -C "$PROJECT_ROOT" ls-remote --tags --refs "$remote" 'v*' '[0-9]*' 2>/dev/null |
+    self_update_check_command git -C "$PROJECT_ROOT" ls-remote --tags --refs "$remote" 'v*' '[0-9]*' 2>/dev/null |
         awk '{ sub("^refs/tags/", "", $2); print $2 }'
 }
 
@@ -499,17 +526,28 @@ latest_github_release_tag() {
     local remote_url="$2"
     local repo_slug
     local tag_list
+    local check_rc
 
     repo_slug="$(github_repo_from_remote_url "$remote_url" || true)"
     [[ -n "$repo_slug" ]] || return 1
 
-    tag_list="$(release_tags_from_github_cli "$repo_slug" || true)"
-    if [[ -n "$tag_list" ]]; then
-        newest_version_tag_from_list <<< "$tag_list"
-        return
+    if tag_list="$(release_tags_from_github_cli "$repo_slug")"; then
+        if [[ -n "$tag_list" ]]; then
+            newest_version_tag_from_list <<< "$tag_list"
+            return
+        fi
+    else
+        check_rc=$?
+        [[ "$check_rc" -eq 124 ]] && return 124
     fi
 
-    tag_list="$(release_tags_from_git_remote "$remote" || true)"
+    if tag_list="$(release_tags_from_git_remote "$remote")"; then
+        :
+    else
+        check_rc=$?
+        [[ "$check_rc" -eq 124 ]] && return 124
+        return 1
+    fi
     [[ -n "$tag_list" ]] || return 1
     newest_version_tag_from_list <<< "$tag_list"
 }
@@ -575,6 +613,7 @@ self_update_if_newer() {
     local latest_tag
     local latest_version
     local restart_wrapper
+    local update_check_rc=0
 
     [[ "${LINUX_CLI_SKIP_SELF_UPDATE:-0}" != "1" ]] || return 0
     [[ "${LINUX_CLI_SELF_UPDATE_RESTARTED:-0}" != "1" ]] || return 0
@@ -603,9 +642,18 @@ self_update_if_newer() {
 
     log "Checking GitHub releases for a newer linux-cli-setup version."
     current_version="$(project_version)"
-    latest_tag="$(latest_github_release_tag "$remote" "$remote_url" || true)"
+    if latest_tag="$(latest_github_release_tag "$remote" "$remote_url")"; then
+        :
+    else
+        update_check_rc=$?
+        latest_tag=""
+    fi
 
     if [[ -z "$latest_tag" ]]; then
+        if [[ "$update_check_rc" -eq 124 ]]; then
+            warn "GitHub update check timed out after ${SELF_UPDATE_CHECK_TIMEOUT_SECONDS} seconds without a response; continuing with version $current_version."
+            return 0
+        fi
         warn "Could not find a GitHub release or prerelease tag; continuing with version $current_version."
         return 0
     fi
@@ -824,7 +872,7 @@ profile_description() {
             printf 'Python, C/C++ build tools, Neovim, uv, pipx tools, and developer Git helpers'
             ;;
         netops)
-            printf 'DNS, packet capture, port scanning, VPN, SSH, transfer, and MSP troubleshooting tools'
+            printf 'DNS, packet capture, port scanning, ARP discovery/reachability, SSH, transfer, and MSP troubleshooting tools'
             ;;
         wireless)
             printf 'NetworkManager, Wi-Fi scanning, firmware, RF-kill, mobile broadband, and wireless CLI helpers'

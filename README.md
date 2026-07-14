@@ -2,7 +2,7 @@
 
 Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. A fresh install defaults to a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, Docker hosting, and desktop helpers are optional package groups.
 
-Current unreleased alpha testing version: `0.4a`.
+Current unreleased beta testing version: `0.5b`.
 
 ## Supported Systems
 
@@ -43,7 +43,7 @@ Package names are read from [data/package-groups.yaml](data/package-groups.yaml)
 Package status lines show the owning profile for package actions, such as `core/curl` or `netops/nmap`. Use `--motd keep`, `--motd replace`, or `--motd combine` to choose login MOTD behavior. Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
 Performance tuning and hardening are enabled by default. Use `--skip-performance` or `--skip-hardening` when you need to leave those settings untouched for a specific host.
 
-Before install, saved-profile refresh, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is. If an install, refresh, or uninstall fails, exits nonzero, or is interrupted with Ctrl+C or a termination signal, the active transaction rolls back before the script exits and skips over rollback errors so cleanup can continue.
+Before install, saved-profile refresh, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. The release lookup times out after 10 seconds without a response, warns, and continues with the installed version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is. If an install, refresh, or uninstall fails, exits nonzero, or is interrupted with Ctrl+C or a termination signal, the active transaction rolls back before the script exits and skips over rollback errors so cleanup can continue.
 
 Show the script version:
 
@@ -156,6 +156,7 @@ Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, T
 | WHOIS | `whois` | `whois` |
 | Netcat / sockets | `openbsd-netcat`, `nmap` for `ncat`, `socat` | `netcat-openbsd`, `ncat`, `socat` |
 | ARP discovery | `arp-scan` | `arp-scan` |
+| ARP reachability | `iputils` provides `arping` | `arping` |
 | SMB testing | `smbclient` | `smbclient` |
 | Rootkit scanner | `rkhunter` | `rkhunter` |
 
@@ -258,7 +259,7 @@ sudo ./install.sh --profile dev,docker
 
 `update.sh` remains as a compatibility wrapper to `install.sh`, but new automation should call `install.sh`.
 
-Install and refresh runs create a log under `/var/log/linux-cli-setup/`. Package-manager output is hidden by default; the console shows each item being installed or updated. If a required step fails, the scripts show the error plus the last captured output for that item and roll back managed changes from that run. Package-manager system upgrades cannot be fully reversed by any shell script, but project-managed files, shell changes, and packages installed by the current run are rolled back where possible.
+Install and refresh runs create a persistent log under `/var/log/linux-cli-setup/` and print the exact log path at the end of successful, failed, and interrupted runs. Package-manager output is hidden by default; the console shows each item being installed or updated. If a required step fails, the scripts show the error plus the last captured output for that item and roll back managed changes from that run. Package-manager system upgrades cannot be fully reversed by any shell script, but project-managed files, shell changes, and packages installed by the current run are rolled back where possible.
 
 ## Uninstall
 
@@ -275,7 +276,7 @@ sudo ./uninstall.sh --remove-packages
 sudo ./uninstall.sh --remove-packages --profile docker
 ```
 
-Uninstall also logs to `/var/log/linux-cli-setup/`. It keeps going after individual errors and reports each item being removed.
+Uninstall also keeps a persistent log under `/var/log/linux-cli-setup/` and prints its exact path at the end of successful, failed, and interrupted runs. It keeps going after individual errors and reports each item being removed.
 
 Uninstall removes managed files, restores the saved shell, re-enables disabled MOTD snippets, and removes the default automatic update config. If the automatic update config was edited, uninstall backs it up instead of deleting it because it may contain local Pushover settings. Exact reversal of package-manager upgrades, firewall state, time settings, service enablement, and packages that existed before linux-cli-setup is not guaranteed.
 

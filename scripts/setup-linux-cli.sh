@@ -164,6 +164,7 @@ main() {
     if profile_is_selected docker; then
         log "Docker group membership takes effect after $TARGET_USER logs out and back in."
     fi
+    report_log_location
 }
 
 main "$@"

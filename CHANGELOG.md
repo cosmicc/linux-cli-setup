@@ -2,10 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.4a - Unreleased
+## 0.5b - Unreleased
 
 ### Added
 
+- Added the standalone Debian/Ubuntu `arping` package to the netops profile; Arch already receives the `arping` command from its existing `iputils` package.
 - Added chrony, fail2ban, and logrotate to the core package set for baseline NTP, SSH protection, and log maintenance.
 - Added managed chrony configuration with DHCP NTP sources and `us.pool.ntp.org` fallback.
 - Added managed NetworkManager and dhclient hooks that pass DHCP-provided NTP servers to chrony.
@@ -24,6 +25,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Changed the initial GitHub release lookup to time out after 10 seconds without a response, warn, and continue with the installed version.
+- Changed install, refresh, and uninstall completion handling to print the exact persistent log path on successful, failed, and interrupted exits.
 - Changed package action output to show the owning profile as `profile/package` and switched action lines away from dark blue to a brighter console color.
 - Changed time synchronization from systemd-timesyncd to chrony and disabled the previous timesyncd service during install or refresh.
 - Changed the package group source from tab-delimited `data/package-groups.tsv` to editable `data/package-groups.yaml`.
@@ -89,7 +92,7 @@ All notable changes to this project will be documented in this file.
 - Fixed managed Tide prompt colors to use Fish-compatible hex values instead of raw 256-color indexes.
 - Fixed managed Tide OS segment color detection so the generated prompt receives icon, foreground, and background values.
 
-## 0.2a - 2026-06-30
+## 0.2a - 06.30.2026
 
 ### Added
 
@@ -106,7 +109,7 @@ All notable changes to this project will be documented in this file.
 - Changed package uninstall behavior so `--remove-packages` defaults to saved optional groups, always leaves `core` packages installed, and skips packages that belong to retained saved groups.
 - Changed root entrypoint wrappers to preserve the original script path so self-updates can restart the same command after pulling the newer release.
 
-## 0.1a - 2026-06-30
+## 0.1a - 06.30.2026
 
 Alpha prerelease for initial private testing.
 

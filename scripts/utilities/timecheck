@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.4a"
+VERSION="0.5b"
 COMMAND_NAME="$(basename "$0")"
 
 show_help() {

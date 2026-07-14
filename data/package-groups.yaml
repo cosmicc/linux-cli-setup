@@ -254,6 +254,7 @@ package_groups:
       - ncat
       - socat
       - arp-scan
+      - arping
       - smbclient
       - mosh
       - sshfs

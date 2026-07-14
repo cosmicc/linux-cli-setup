@@ -298,6 +298,7 @@ main() {
     clear_transaction_traps
 
     log "Uninstall complete."
+    report_log_location
 }
 
 main "$@"
