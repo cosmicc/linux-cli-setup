@@ -29,6 +29,16 @@ CRON_TEMPLATE_DIR="$PROJECT_ROOT/templates/cron"
 PACKAGE_GROUPS_FILE="$PROJECT_ROOT/data/package-groups.yaml"
 STATE_DIR="/var/lib/linux-cli-setup"
 STATE_FILE="$STATE_DIR/install.env"
+INSTALL_MARKER_PATHS=(
+    "$INSTALLED_VERSION_FILE"
+    "/usr/local/bin/linux-cli-motd"
+    "$MOTD_UPDATE_SNIPPET"
+    "$LEGACY_MOTD_UPDATE_SNIPPET"
+    "/etc/fail2ban/jail.d/linux-cli-setup.conf"
+    "/etc/logrotate.d/linux-cli-setup"
+    "/etc/sysctl.d/99-linux-cli-setup-hardening.conf"
+    "/etc/sysctl.d/99-linux-cli-setup-performance.conf"
+)
 CONFIG_DIR="/etc/linux-cli-setup"
 AUTO_UPDATE_CONFIG="/etc/auto-update.conf"
 LEGACY_AUTO_UPDATE_CONFIG="/etc/linux-cli-setup/auto-update.conf"
@@ -368,14 +378,14 @@ print_version() {
 installed_project_version() {
     local saved_version
 
-    if [[ -f "$INSTALLED_VERSION_FILE" ]]; then
-        tr -d '[:space:]' < "$INSTALLED_VERSION_FILE"
-        return
-    fi
-
     saved_version="$(read_state_value version || true)"
     if [[ -n "$saved_version" ]]; then
         printf '%s' "$saved_version"
+        return
+    fi
+
+    if [[ -f "$INSTALLED_VERSION_FILE" ]]; then
+        tr -d '[:space:]' < "$INSTALLED_VERSION_FILE"
         return
     fi
 
@@ -800,6 +810,22 @@ resolve_motd_mode() {
 
 install_state_exists() {
     [[ -f "$STATE_FILE" ]]
+}
+
+linux_cli_setup_installed() {
+    local marker_path
+
+    if install_state_exists; then
+        return 0
+    fi
+
+    for marker_path in "${INSTALL_MARKER_PATHS[@]}"; do
+        if [[ -e "$marker_path" || -L "$marker_path" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 detect_target_user() {
@@ -2249,7 +2275,9 @@ reenable_motd_snippets() {
 
 install_unifetch_motd_config() {
     log "Installing UniFetch MOTD configuration"
-    install_config_file "$UNIFETCH_MOTD_CONFIG_TEMPLATE" "$UNIFETCH_MOTD_CONFIG" 0644 root root
+    # This is a versioned MOTD asset. Refresh it with the executable while
+    # retaining changed copies through the managed-file backup behavior.
+    install_owned_file "$UNIFETCH_MOTD_CONFIG_TEMPLATE" "$UNIFETCH_MOTD_CONFIG" 0644 root root
 }
 
 remove_unifetch_motd_config() {

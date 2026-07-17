@@ -19,7 +19,7 @@ Run from the user account that should receive Fish as the default shell:
 sudo ./install.sh
 ```
 
-Without profile options, a fresh install installs `core` only. If linux-cli-setup is already installed, `install.sh` exits and directs the operator to `update.sh`. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
+Without profile options, a fresh install installs `core` only. If linux-cli-setup is already installed, `install.sh` exits near the start and directs the operator to `update.sh`. Detection uses `/var/lib/linux-cli-setup/install.env` as the primary state plus linux-cli-setup-specific managed-file markers for legacy installations. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
 
 ```bash
 TARGET_USER=myuser ./install.sh
@@ -252,7 +252,7 @@ After linux-cli-setup is installed, use `update.sh` to update system packages, s
 sudo ./update.sh
 ```
 
-`update.sh` exits if no saved install state exists and directs the operator to run `install.sh` first. It preserves existing configuration files byte-for-byte. For the simple `/etc/auto-update.conf` key/value format, newly introduced settings are appended without changing existing settings. Structured configuration files are never line-merged because doing so could change their meaning. Existing UFW rules, timezone selection, default shell, Git values, Fish/Tide settings, and package selections are preserved. Package caches may be cleaned, but update does not run package autoremove or orphan removal.
+`update.sh` exits if no saved state or legacy managed-install marker exists and directs the operator to run `install.sh` first. It preserves existing host and user configuration files byte-for-byte. For the simple `/etc/auto-update.conf` key/value format, newly introduced settings are appended without changing existing settings. Structured host configuration files are never line-merged because doing so could change their meaning. Versioned MOTD scripts and the managed UniFetch MOTD configuration are refreshed together; a changed previous UniFetch configuration is backed up before replacement. Existing UFW rules, timezone selection, default shell, Git values, Fish/Tide settings, and package selections are preserved. Package caches may be cleaned, but update does not run package autoremove or orphan removal.
 
 You can specify profiles to add while still updating every previously saved profile:
 
@@ -260,7 +260,7 @@ You can specify profiles to add while still updating every previously saved prof
 sudo ./update.sh --profile dev,docker
 ```
 
-At startup, install, update, and uninstall display the running linux-cli-setup version. Update also shows the currently installed version and the target version. Installed version state is available through `lcsversion`.
+At startup, install, update, and uninstall display the running linux-cli-setup version. Update reads the authoritative installed `version=` value from `/var/lib/linux-cli-setup/install.env`, compares it with the target version, and reports whether it is upgrading, refreshing an equivalent version, or running an older checkout than the installed version. A legacy installation without saved version state is marked unknown and receives the current version when update completes successfully. Installed version state is available through `lcsversion`.
 
 Install and update runs create a persistent log under `/var/log/linux-cli-setup/` and print the exact log path at the end of successful, failed, and interrupted runs. Package-manager output is hidden by default; the console shows each item being installed or updated. If a required step fails, the scripts show the error plus the last captured output for that item and roll back managed changes from that run. Package-manager system upgrades cannot be fully reversed by any shell script, but project-managed files and packages installed by the current run are rolled back where possible.
 

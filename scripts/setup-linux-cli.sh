@@ -73,12 +73,12 @@ select_operation_profiles() {
 validate_operation_state() {
     case "${LINUX_CLI_OPERATION:-install}" in
         install)
-            if install_state_exists; then
+            if linux_cli_setup_installed; then
                 die "linux-cli-setup is already installed. Run sudo ./update.sh to update the existing installation."
             fi
             ;;
         update)
-            if ! install_state_exists; then
+            if ! linux_cli_setup_installed; then
                 die "linux-cli-setup is not installed. Run sudo ./install.sh before running update.sh."
             fi
             ;;
@@ -114,6 +114,9 @@ sync_selected_profiles() {
 }
 
 main() {
+    local installed_version
+    local target_version
+
     ENABLE_MOTD_OPTION=1
     parse_profile_selection 1 "$@"
 
@@ -135,17 +138,33 @@ main() {
 
     require_root
     init_logging "${LINUX_CLI_OPERATION:-install}"
-    init_package_family
     log "Running ${LINUX_CLI_OPERATION:-install}.sh with linux-cli-setup version $(project_version)."
     if [[ "${LINUX_CLI_OPERATION:-install}" == "update" ]]; then
-        if install_state_exists; then
-            log "Installed linux-cli-setup version: $(installed_project_version)"
+        if linux_cli_setup_installed; then
+            installed_version="$(installed_project_version)"
         else
-            log "Installed linux-cli-setup version: not installed"
+            installed_version="not installed"
         fi
-        log "Target linux-cli-setup version for this update: $(project_version)"
+        target_version="$(project_version)"
+        log "Installed linux-cli-setup version: $installed_version"
+        log "Target linux-cli-setup version for this update: $target_version"
+
+        if [[ "$installed_version" == "unknown (legacy install)" ]]; then
+            warn "The legacy install has no saved version; a successful update will add version=$target_version to $STATE_FILE."
+        elif [[ "$installed_version" != "not installed" ]]; then
+            if ! version_sort_key "$installed_version" >/dev/null || ! version_sort_key "$target_version" >/dev/null; then
+                warn "Unable to compare installed version '$installed_version' with target version '$target_version'."
+            elif version_is_newer "$target_version" "$installed_version"; then
+                log "Updating linux-cli-setup state from $installed_version to $target_version."
+            elif version_is_newer "$installed_version" "$target_version"; then
+                warn "The installed version $installed_version is newer than the running update version $target_version."
+            else
+                log "Installed and target linux-cli-setup versions are equivalent; refreshing managed components."
+            fi
+        fi
     fi
     validate_operation_state
+    init_package_family
     self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     start_transaction
     register_transaction_traps
@@ -204,4 +223,6 @@ main() {
     report_log_location
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

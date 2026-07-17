@@ -32,11 +32,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Split install and update behavior: `install.sh` now rejects existing installs, while `update.sh` requires saved install state and updates every saved profile.
+- Split install and update behavior: `install.sh` now rejects existing installs, while `update.sh` requires saved state or a legacy managed-install marker and updates every saved profile.
 - Changed `update.sh` to preserve existing configuration files byte-for-byte, add missing structured configuration files, append only safely parsed missing auto-update settings, preserve firewall/timezone/shell/Git/Tide choices, and avoid package autoremove or orphan removal.
 - Changed install, update, and uninstall startup output to show the running version; update also shows installed and target versions.
+- Changed update startup to compare the authoritative `version=` value in install state with the running target and migrate legacy installs that lack saved version state.
 - Changed MOTD network, storage, package, firewall, and service probes to use local data or short timeouts so unavailable resources do not significantly delay login.
-- Changed preserved legacy UniFetch MOTD configurations to receive newer status fields from the managed MOTD executable without rewriting the configuration file.
+- Changed install detection to use saved state plus project-specific managed markers so legacy installations are rejected by `install.sh` and accepted by `update.sh`.
+- Changed update to refresh the versioned UniFetch MOTD configuration with the MOTD executable, backing up changed prior copies before replacement.
 - Changed the initial GitHub release lookup to time out after 10 seconds without a response, warn, and continue with the installed version.
 - Changed install, update, and uninstall completion handling to print the exact persistent log path on successful, failed, and interrupted exits.
 - Changed package action output to show the owning profile as `profile/package` and switched action lines away from dark blue to a brighter console color.

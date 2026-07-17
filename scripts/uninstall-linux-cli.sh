@@ -287,7 +287,7 @@ main() {
     init_logging uninstall
     init_package_family
     log "Running uninstall.sh with linux-cli-setup version $(project_version)."
-    if install_state_exists; then
+    if linux_cli_setup_installed; then
         log "Installed linux-cli-setup version: $(installed_project_version)"
     else
         log "Installed linux-cli-setup version: not installed"

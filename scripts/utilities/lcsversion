@@ -6,6 +6,15 @@ set -euo pipefail
 
 STATE_FILE="/var/lib/linux-cli-setup/install.env"
 INSTALLED_VERSION_FILE="/usr/local/share/linux-cli-setup/VERSION"
+INSTALL_MARKER_PATHS=(
+    "/usr/local/bin/linux-cli-motd"
+    "/etc/update-motd.d/99-linux-cli-setup"
+    "/etc/update-motd.d/50-linux-cli-setup"
+    "/etc/fail2ban/jail.d/linux-cli-setup.conf"
+    "/etc/logrotate.d/linux-cli-setup"
+    "/etc/sysctl.d/99-linux-cli-setup-hardening.conf"
+    "/etc/sysctl.d/99-linux-cli-setup-performance.conf"
+)
 SCRIPT_VERSION="0.5b"
 
 show_help() {
@@ -39,15 +48,29 @@ if [[ "$#" -gt 1 ]]; then
     exit 2
 fi
 
-if [[ ! -f "$STATE_FILE" ]]; then
+installed=0
+if [[ -f "$STATE_FILE" || -f "$INSTALLED_VERSION_FILE" ]]; then
+    installed=1
+else
+    for marker_path in "${INSTALL_MARKER_PATHS[@]}"; do
+        if [[ -e "$marker_path" || -L "$marker_path" ]]; then
+            installed=1
+            break
+        fi
+    done
+fi
+
+if [[ "$installed" -eq 0 ]]; then
     printf 'linux-cli-setup is not installed.\n'
     exit 0
 fi
 
-if [[ -r "$INSTALLED_VERSION_FILE" ]]; then
+if [[ -r "$STATE_FILE" ]]; then
+    version="$(awk -F= '$1 == "version" { print substr($0, index($0, "=") + 1); exit }' "$STATE_FILE")"
+elif [[ -r "$INSTALLED_VERSION_FILE" ]]; then
     version="$(tr -d '[:space:]' < "$INSTALLED_VERSION_FILE")"
 else
-    version="$(awk -F= '$1 == "version" { print substr($0, index($0, "=") + 1); exit }' "$STATE_FILE")"
+    version=""
 fi
 
 printf 'linux-cli-setup %s\n' "${version:-unknown (legacy install)}"
