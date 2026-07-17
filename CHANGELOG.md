@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.5b - Unreleased
+## 0.5b - 07.17.2026
 
 ### Added
 
@@ -37,6 +37,8 @@ All notable changes to this project will be documented in this file.
 - Changed install, update, and uninstall startup output to show the running version; update also shows installed and target versions.
 - Changed update startup to compare the authoritative `version=` value in install state with the running target and migrate legacy installs that lack saved version state.
 - Changed MOTD network, storage, package, firewall, and service probes to use local data or short timeouts so unavailable resources do not significantly delay login.
+- Changed built-in MOTD status rows to align every value, including mounted storage, to the same column.
+- Changed `internetcheck` throughput tests to approximately 50 MB down and 20 MB up with a visible running indicator.
 - Changed install detection to use saved state plus project-specific managed markers so legacy installations are rejected by `install.sh` and accepted by `update.sh`.
 - Changed update to refresh the versioned UniFetch MOTD configuration with the MOTD executable, backing up changed prior copies before replacement.
 - Changed the initial GitHub release lookup to time out after 10 seconds without a response, warn, and continue with the installed version.

@@ -13,6 +13,7 @@ PUBLIC_IP_TIMEOUT=1
 MOTD_COMMAND_TIMEOUT=2
 MOTD_STORAGE_TIMEOUT=1
 UNIFETCH_TIMEOUT=4
+STATUS_LABEL_WIDTH=22
 
 mounted_storage_paths() {
     local device_id filesystem_type local_source mountpoint raw_mountpoint source storage_key
@@ -97,6 +98,13 @@ section_separator() {
     printf '%*s\n' 78 '' | tr ' ' '-'
 }
 
+status_line() {
+    local label="$1"
+    local value="$2"
+
+    printf '  %-*s %s\n' "$STATUS_LABEL_WIDTH" "$label" "$value"
+}
+
 format_bytes_gib() {
     local kib="$1"
     awk -v kib="$kib" 'BEGIN { printf "%.1fGi", kib / 1024 / 1024 }'
@@ -133,8 +141,7 @@ storage_summary() {
 
     while read -r total used remaining percent mountpoint; do
         [[ "$total" == "Size" || -z "$mountpoint" ]] && continue
-        printf '  %-22s %s used of %s (%s), %s free\n' \
-            "Disk ($mountpoint):" "$used" "$total" "$percent" "$remaining"
+        status_line "Disk ($mountpoint):" "$used used of $total ($percent), $remaining free"
     done <<< "$disk_output"
 }
 
@@ -198,19 +205,19 @@ extended_status_block() {
     separator
     printf '  linux-cli-setup status\n'
     separator
-    printf '  %-13s %s\n' 'OS:' "$(os_summary)"
-    printf '  %-13s %s\n' 'Kernel:' "$(uname -r)"
+    status_line 'OS:' "$(os_summary)"
+    status_line 'Kernel:' "$(uname -r)"
     storage_summary
     public_ip="$(public_ip_summary)"
     if [[ "$public_ip" == "unavailable" ]]; then
-        printf '  %-13s %s\n' 'Internet:' 'unavailable'
+        status_line 'Internet:' 'unavailable'
     else
-        printf '  %-13s online (%s)\n' 'Internet:' "$public_ip"
+        status_line 'Internet:' "online ($public_ip)"
     fi
-    printf '  %-13s %s\n' 'Updates:' "$(package_update_summary)"
-    printf '  %-13s %s\n' 'Firewall:' "$(firewall_summary)"
-    printf '  %-13s %s\n' 'SSH:' "$(ssh_status)"
-    printf '  %-17s %s\n' 'Reboot Required:' "$(reboot_required)"
+    status_line 'Updates:' "$(package_update_summary)"
+    status_line 'Firewall:' "$(firewall_summary)"
+    status_line 'SSH:' "$(ssh_status)"
+    status_line 'Reboot Required:' "$(reboot_required)"
     separator
 }
 
@@ -291,23 +298,23 @@ load_average="$(cut -d' ' -f1-3 /proc/loadavg)"
 separator
 printf '  %s\n' "$host_name"
 separator
-printf '  %-13s %s\n' 'Uptime:' "$(uptime -p | sed 's/^up //')"
-printf '  %-13s %s\n' 'OS:' "$(os_summary)"
-printf '  %-13s %s\n' 'Kernel:' "$(uname -r)"
-printf '  %-13s %s\n' 'Load Avg:' "$load_average"
-printf '  %-13s %s\n' 'Memory:' "$(memory_summary)"
+status_line 'Uptime:' "$(uptime -p | sed 's/^up //')"
+status_line 'OS:' "$(os_summary)"
+status_line 'Kernel:' "$(uname -r)"
+status_line 'Load Avg:' "$load_average"
+status_line 'Memory:' "$(memory_summary)"
 storage_summary
-printf '  %-13s %s\n' 'Local IP:' "$(ip_summary)"
+status_line 'Local IP:' "$(ip_summary)"
 public_ip="$(public_ip_summary)"
 if [[ "$public_ip" == "unavailable" ]]; then
-    printf '  %-13s %s\n' 'Internet:' 'unavailable'
+    status_line 'Internet:' 'unavailable'
 else
-    printf '  %-13s online (%s)\n' 'Internet:' "$public_ip"
+    status_line 'Internet:' "online ($public_ip)"
 fi
 section_separator
-printf '  ssh: %s\n' "$(ssh_status)"
-printf '  ufw: %s\n' "$(firewall_summary)"
-printf '  updates: %s\n' "$(package_update_summary)"
+status_line 'SSH:' "$(ssh_status)"
+status_line 'UFW:' "$(firewall_summary)"
+status_line 'Updates:' "$(package_update_summary)"
 section_separator
-printf '  %-17s %s\n' 'Reboot Required:' "$(reboot_required)"
+status_line 'Reboot Required:' "$(reboot_required)"
 separator

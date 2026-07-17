@@ -7,9 +7,10 @@ set -euo pipefail
 VERSION="0.5b"
 COMMAND_NAME="$(basename "$0")"
 PUBLIC_IP_URL="https://api.ipify.org"
-CLOUDFLARE_DOWNLOAD_URL="https://speed.cloudflare.com/__down?bytes=5000000"
+CLOUDFLARE_DOWNLOAD_URL="https://speed.cloudflare.com/__down?bytes=50000000"
 CLOUDFLARE_UPLOAD_URL="https://speed.cloudflare.com/__up"
-SPEED_TEST_TIMEOUT=10
+SPEED_TEST_TIMEOUT=60
+UPLOAD_TEST_BYTES=20000000
 SKIP_SPEED=0
 
 show_help() {
@@ -18,7 +19,7 @@ Usage: $COMMAND_NAME [--skip-speed] [--version] [--help]
 
 Check Internet connectivity, external IP, Cloudflare latency, configured DNS
 server reachability and query latency, and bounded Cloudflare download/upload
-throughput. The speed test transfers approximately 5 MB down and 1 MB up.
+throughput. The speed test transfers approximately 50 MB down and 20 MB up.
 
 Options:
   --skip-speed  Skip the download and upload throughput test.
@@ -119,16 +120,23 @@ bytes_per_second_to_mbps() {
 run_speed_test() {
     local download_speed upload_speed
 
+    printf 'Running speed test...'
+
     download_speed="$(
         curl -fsS --connect-timeout 3 --max-time "$SPEED_TEST_TIMEOUT" \
             -o /dev/null -w '%{speed_download}' "$CLOUDFLARE_DOWNLOAD_URL" 2>/dev/null || true
     )"
     upload_speed="$(
-        head -c 1000000 /dev/zero |
+        head -c "$UPLOAD_TEST_BYTES" /dev/zero |
             curl -fsS --connect-timeout 3 --max-time "$SPEED_TEST_TIMEOUT" \
                 -o /dev/null -w '%{speed_upload}' --data-binary @- "$CLOUDFLARE_UPLOAD_URL" 2>/dev/null || true
     )"
 
+    if [[ -t 1 ]]; then
+        printf '\r\033[2K'
+    else
+        printf '\n'
+    fi
     printf 'Download: %s\n' "$(bytes_per_second_to_mbps "${download_speed:-0}")"
     printf 'Upload:   %s\n' "$(bytes_per_second_to_mbps "${upload_speed:-0}")"
 }
@@ -155,6 +163,6 @@ else
 fi
 
 if [[ "$SKIP_SPEED" -eq 0 ]]; then
-    print_heading 'Quick Cloudflare Speed Test'
+    print_heading 'Cloudflare Speed Test'
     run_speed_test
 fi
