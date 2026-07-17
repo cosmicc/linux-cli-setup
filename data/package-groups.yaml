@@ -23,6 +23,9 @@ package_groups:
       - chrony
       - fail2ban
       - logrotate
+      - bind
+      - fping
+      - iproute2
       - unzip
       - zip
       - 7zip
@@ -47,6 +50,9 @@ package_groups:
       - chrony
       - fail2ban
       - logrotate
+      - bind9-dnsutils
+      - fping
+      - iproute2
       - unzip
       - zip
       - p7zip-full
@@ -214,8 +220,6 @@ package_groups:
   - group: netops
     tier: recommended
     arch:
-      - bind
-      - iproute2
       - iputils
       - traceroute
       - mtr
@@ -236,10 +240,7 @@ package_groups:
       - rkhunter
       - sslscan
       - testssl.sh
-      - fping
     debian_ubuntu:
-      - bind9-dnsutils
-      - iproute2
       - iputils-ping
       - traceroute
       - mtr-tiny
@@ -262,8 +263,7 @@ package_groups:
       - rkhunter
       - sslscan
       - testssl.sh
-      - fping
-    notes: "IT, security, and network troubleshooting tools. Arch nmap provides ncat; Debian/Ubuntu installs ncat separately."
+    notes: "IT, security, and network troubleshooting tools. Core provides dig, fping, and iproute2; Arch nmap provides ncat, while Debian/Ubuntu installs ncat separately."
 
   - group: wireless
     tier: recommended

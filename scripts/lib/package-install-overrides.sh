@@ -216,7 +216,7 @@ install_custom_fish_prompt() {
         return 0
     fi
 
-    install_owned_file "$prompt_template" "$fish_config_dir/functions/fish_prompt.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
+    install_config_file "$prompt_template" "$fish_config_dir/functions/fish_prompt.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
 }
 
 fish_plugin_is_registered() {
@@ -290,8 +290,8 @@ configure_fish_files() {
     run_step_optional "Creating directory" "$config_root/atuin" install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0700 -d "$config_root/atuin" || true
     run_step_optional "Setting ownership" "$config_root/atuin" chown -R "$TARGET_USER:$TARGET_GROUP" "$config_root/atuin" || true
 
-    install_owned_file "$FISH_TEMPLATE_DIR/config.fish" "$fish_config_dir/config.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
-    install_owned_file "$FISH_TEMPLATE_DIR/fish_plugins" "$fish_config_dir/fish_plugins" 0644 "$TARGET_USER" "$TARGET_GROUP"
+    install_config_file "$FISH_TEMPLATE_DIR/config.fish" "$fish_config_dir/config.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
+    install_config_file "$FISH_TEMPLATE_DIR/fish_plugins" "$fish_config_dir/fish_plugins" 0644 "$TARGET_USER" "$TARGET_GROUP"
 
     if profile_is_selected comfort; then
         install_fish_function_templates "${COMFORT_FISH_FUNCTIONS[@]}"
@@ -312,24 +312,53 @@ install_fisher_plugins() {
     verify_tide_helpers_installed
 
     log "Applying Tide prompt settings"
-    run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
+    if is_update_operation; then
+        log "Preserving existing Tide prompt settings during update."
+    else
+        run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
+    fi
     install_custom_fish_prompt
 }
 
 update_fisher_plugins() {
-    local plugin_list
+    local fish_plugins_backup=""
+    local fish_plugins_file="$TARGET_HOME/.config/fish/fish_plugins"
+    local update_rc=0
 
     if ! command -v fish >/dev/null 2>&1; then
         warn "Fish is not installed; skipping Fisher plugin update"
         return
     fi
 
+    if [[ -f "$fish_plugins_file" ]]; then
+        fish_plugins_backup="$(mktemp)"
+        cp -p -- "$fish_plugins_file" "$fish_plugins_backup"
+    fi
+
     log "Updating Fisher plugins for $TARGET_USER"
-    plugin_list="$(grep -Ev '^[[:space:]]*(#|$)' "$FISH_TEMPLATE_DIR/fish_plugins" | tr '\n' ' ')"
-    prepare_fisher_plugin_conflicts
-    run_step "Updating" "Fisher plugins" run_as_target fish -lc "if functions -q fisher; fisher install $plugin_list; and fisher update; else curl -fsSL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source; and fisher install $plugin_list; end"
-    verify_tide_helpers_installed
-    run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
+    if run_step "Updating" "registered Fisher plugins" run_as_target fish -lc "functions -q fisher; or exit 0; fisher update"; then
+        update_rc=0
+    else
+        update_rc=$?
+    fi
+
+    if [[ -n "$fish_plugins_backup" ]]; then
+        if [[ ! -f "$fish_plugins_file" ]] || ! cmp -s "$fish_plugins_backup" "$fish_plugins_file"; then
+            run_step "Restoring configuration" "$fish_plugins_file" cp -p -- "$fish_plugins_backup" "$fish_plugins_file"
+        fi
+        rm -f -- "$fish_plugins_backup"
+    fi
+
+    if [[ "$update_rc" -ne 0 ]]; then
+        return "$update_rc"
+    fi
+
+    if fish_plugin_is_registered "IlanCosman/tide@v6" || fish_plugin_is_registered "ilancosman/tide@v6"; then
+        verify_tide_helpers_installed
+    else
+        warn "Tide is not registered with Fisher; preserving Fish configuration and skipping Tide verification."
+    fi
+    log "Preserving existing Tide prompt settings during update."
     install_custom_fish_prompt
 }
 
@@ -403,6 +432,30 @@ remove_linux_cli_motd_hooks() {
 }
 
 install_motd() {
+    if is_update_operation; then
+        case "${MOTD_MODE:-replace}" in
+            keep)
+                log "Preserving existing keep-mode MOTD configuration during update."
+                return 0
+                ;;
+            combine|replace)
+                log "Updating MOTD executables while preserving existing MOTD configuration."
+                install_unifetch_motd_config
+                install_owned_file "$MOTD_TEMPLATE" /usr/local/bin/linux-cli-motd 0755 root root
+                if [[ -d /etc/update-motd.d ]]; then
+                    install_owned_file "$MOTD_TEMPLATE" "$MOTD_UPDATE_SNIPPET" 0755 root root
+                else
+                    run_step "Creating directory" "/etc/fish/conf.d" install -m 0755 -d /etc/fish/conf.d
+                    install_config_file "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish" /etc/fish/conf.d/linux-cli-motd.fish 0644 root root
+                fi
+                return 0
+                ;;
+            *)
+                die "Unknown MOTD mode '${MOTD_MODE:-}'. Use keep, replace, or combine."
+                ;;
+        esac
+    fi
+
     case "${MOTD_MODE:-replace}" in
         keep)
             log "Keeping existing MOTD and removing linux-cli-setup login MOTD hooks."
@@ -454,6 +507,6 @@ install_motd() {
 
     log "No /etc/update-motd.d directory found; installing Fish login MOTD hook"
     run_step "Creating directory" "/etc/fish/conf.d" install -m 0755 -d /etc/fish/conf.d
-    install_owned_file "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish" /etc/fish/conf.d/linux-cli-motd.fish 0644 root root
+    install_config_file "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish" /etc/fish/conf.d/linux-cli-motd.fish 0644 root root
     suppress_static_motd
 }

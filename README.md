@@ -2,7 +2,7 @@
 
 Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. A fresh install defaults to a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, Docker hosting, and desktop helpers are optional package groups.
 
-Current unreleased beta testing version: `0.5b`.
+Current beta prerelease version: `0.5b`.
 
 ## Supported Systems
 
@@ -19,7 +19,7 @@ Run from the user account that should receive Fish as the default shell:
 sudo ./install.sh
 ```
 
-Without profile options, a fresh install installs `core` only. If linux-cli-setup was already installed, `install.sh` uses the saved profiles and refreshes that installation. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
+Without profile options, a fresh install installs `core` only. If linux-cli-setup is already installed, `install.sh` exits near the start and directs the operator to `update.sh`. Detection uses `/var/lib/linux-cli-setup/install.env` as the primary state plus linux-cli-setup-specific managed-file markers for legacy installations. The script targets the sudoing user from `$SUDO_USER`, not `root`. If you must run as root directly, set the target user:
 
 ```bash
 TARGET_USER=myuser ./install.sh
@@ -43,7 +43,7 @@ Package names are read from [data/package-groups.yaml](data/package-groups.yaml)
 Package status lines show the owning profile for package actions, such as `core/curl` or `netops/nmap`. Use `--motd keep`, `--motd replace`, or `--motd combine` to choose login MOTD behavior. Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
 Performance tuning and hardening are enabled by default. Use `--skip-performance` or `--skip-hardening` when you need to leave those settings untouched for a specific host.
 
-Before install, saved-profile refresh, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. The release lookup times out after 10 seconds without a response, warns, and continues with the installed version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is. If an install, refresh, or uninstall fails, exits nonzero, or is interrupted with Ctrl+C or a termination signal, the active transaction rolls back before the script exits and skips over rollback errors so cleanup can continue.
+Before install, update, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. The release lookup times out after 10 seconds without a response, warns, and continues with the running version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is. If an install, update, or uninstall fails, exits nonzero, or is interrupted with Ctrl+C or a termination signal, the active transaction rolls back before the script exits and skips over rollback errors so cleanup can continue.
 
 Show the script version:
 
@@ -52,6 +52,7 @@ Show the script version:
 ./update.sh --version
 ./uninstall.sh --version
 ./install_test.sh --version
+lcsversion
 ```
 
 Available profiles:
@@ -70,7 +71,7 @@ Available profiles:
 
 ## Core Install
 
-The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony, fail2ban, logrotate, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt with rounded left and right status segments, including Git status, long-command duration, and project/toolchain indicators when Tide detects them, and a dynamic MOTD. The MOTD prefers UniFetch when available and falls back to the built-in linux-cli-setup status block when it is not. Rerunning install refreshes the Tide settings and managed prompt file. The installer lets Fisher install Tide first, verifies Tide helpers, and then reapplies the managed prompt. If Tide helper functions are missing, the managed prompt falls back to a basic Fish prompt instead of printing login errors. The managed Fisher plugin set installed by default is Fisher, Tide, fzf.fish, autopair.fish, bass, and done.
+The `core` profile installs OpenSSH, Git, Vim, NFS client support, UFW firewall, chrony, fail2ban, logrotate, DNS lookup and latency tools, Fish, htop, btop, JetBrainsMono Nerd Font Mono, Fisher, Tide, a screenshot-inspired Fish prompt with rounded left and right status segments, including Git status, long-command duration, and project/toolchain indicators when Tide detects them, and a dynamic MOTD. The MOTD prefers UniFetch when available and falls back to the built-in linux-cli-setup status block when it is not. The installer lets Fisher install Tide first, verifies Tide helpers, and then applies the managed prompt. If Tide helper functions are missing, the managed prompt falls back to a basic Fish prompt instead of printing login errors. The managed Fisher plugin set installed by default is Fisher, Tide, fzf.fish, autopair.fish, bass, and done.
 
 It also adds common CLI tools:
 
@@ -82,6 +83,7 @@ It also adds common CLI tools:
 | Baseline editor | `vim` | `vim` |
 | NFS client support | `nfs-utils` | `nfs-common` |
 | Firewall | `ufw` | `ufw` |
+| DNS / latency / IP | `bind`, `fping`, `iproute2` | `bind9-dnsutils`, `fping`, `iproute2` |
 | Search / navigation | `ripgrep`, `fd`, `fzf`, `plocate` | `ripgrep`, `fd-find`, `fzf`, `plocate` |
 | File viewing | `bat`, `eza`, `tree`, `less` | `bat`, `eza`, `tree`, `less` |
 | JSON / YAML | `jq`, `yq` | `jq`, `yq` |
@@ -100,7 +102,7 @@ Recommended package rows are best-effort. On Arch, the installer checks pacman f
 
 The installer configures UFW with a default deny incoming policy, default allow outgoing policy, and explicit inbound allowances for SSH, iperf3 on port `5201` TCP/UDP, and ICMP echo-request ping. It does not reset pre-existing UFW rules.
 
-Install and saved-profile refresh also run clear performance and hardening sections. Performance tuning installs conservative sysctl defaults for file watchers, file handles, cache pressure, dirty page writeback, local service backlog, and MTU probing, and enables `fstrim.timer` when systemd provides it. Hardening configures UFW, fail2ban, managed sysctl protections, sticky `/tmp` and `/var/tmp`, conservative OpenSSH daemon guardrails, and Debian apt settings that reject insecure repositories. These steps are best-effort and continue on failure unless a required package install fails.
+Install and update also run clear performance and hardening sections. Fresh install configures the managed defaults. Update preserves existing configuration content, applies existing sysctl settings, enables expected services, and adds only missing configuration files. These steps are best-effort and continue on failure unless a required package install fails.
 
 ## Package Availability Test
 
@@ -140,17 +142,16 @@ The installer also creates a managed SSH include file at `~/.ssh/conf.d/00-defau
 
 ### Netops
 
-Installs DNS tools, IP/ping tools, trace tools, packet capture, port scanning, TLS/SSL testing, bandwidth and latency testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, `mosh`, `sshfs`, `rclone`, and `rkhunter`. `rsync` is part of core, and SSH brute-force protection is configured by the core fail2ban install.
+Installs additional ping and trace tools, packet capture, port scanning, TLS/SSL testing, bandwidth testing, interface tools, open-port/process tools, WHOIS, Netcat/socket tools, ARP discovery, SMB testing, `mosh`, `sshfs`, `rclone`, and `rkhunter`. Baseline `dig`, `fping`, `iproute2`, `rsync`, and SSH brute-force protection are part of core.
 
 | Purpose | Arch | Debian / Ubuntu |
 | --- | --- | --- |
-| DNS tools | `bind` | `bind9-dnsutils` |
-| Ping/IP tools | `iproute2`, `iputils` | `iproute2`, `iputils-ping` |
+| Ping tools | `iputils` | `iputils-ping` |
 | Trace / latency | `traceroute`, `mtr` | `traceroute`, `mtr-tiny` |
 | Packet capture | `tcpdump`, `wireshark-cli` | `tcpdump`, `tshark` |
 | Port scanning | `nmap` | `nmap` |
 | TLS / SSL testing | `sslscan`, `testssl.sh` | `sslscan`, `testssl.sh` |
-| Bandwidth / latency testing | `iperf3`, `fping` | `iperf3`, `fping` |
+| Bandwidth testing | `iperf3` | `iperf3` |
 | Interface tools | `ethtool` | `ethtool` |
 | Open ports/processes | `lsof` | `lsof` |
 | WHOIS | `whois` | `whois` |
@@ -243,23 +244,25 @@ Arch systems also get `pacman-contrib`, `reflector`, `pkgfile`, and `base-devel`
 
 Debian/Ubuntu systems also get `apt-file`, `needrestart`, `debian-goodies`, `apt-transport-https`, `unattended-upgrades`, and `nala` where available.
 
-## Refresh
+## Update
 
-After linux-cli-setup is installed, run `install.sh` again without profile options to refresh packages, managed Fish config, Fisher plugins, Tide settings, and MOTD for the saved profiles:
-
-```bash
-sudo ./install.sh
-```
-
-It reads the current package map and installs any missing packages from the saved profiles. You can also specify profiles to add or refresh:
+After linux-cli-setup is installed, use `update.sh` to update system packages, saved profile packages, registered Fisher plugins, managed executables, services, and missing configuration files:
 
 ```bash
-sudo ./install.sh --profile dev,docker
+sudo ./update.sh
 ```
 
-`update.sh` remains as a compatibility wrapper to `install.sh`, but new automation should call `install.sh`.
+`update.sh` exits if no saved state or legacy managed-install marker exists and directs the operator to run `install.sh` first. It preserves existing host and user configuration files byte-for-byte. For the simple `/etc/auto-update.conf` key/value format, newly introduced settings are appended without changing existing settings. Structured host configuration files are never line-merged because doing so could change their meaning. Versioned MOTD scripts and the managed UniFetch MOTD configuration are refreshed together; a changed previous UniFetch configuration is backed up before replacement. Existing UFW rules, timezone selection, default shell, Git values, Fish/Tide settings, and package selections are preserved. Package caches may be cleaned, but update does not run package autoremove or orphan removal.
 
-Install and refresh runs create a persistent log under `/var/log/linux-cli-setup/` and print the exact log path at the end of successful, failed, and interrupted runs. Package-manager output is hidden by default; the console shows each item being installed or updated. If a required step fails, the scripts show the error plus the last captured output for that item and roll back managed changes from that run. Package-manager system upgrades cannot be fully reversed by any shell script, but project-managed files, shell changes, and packages installed by the current run are rolled back where possible.
+You can specify profiles to add while still updating every previously saved profile:
+
+```bash
+sudo ./update.sh --profile dev,docker
+```
+
+At startup, install, update, and uninstall display the running linux-cli-setup version. Update reads the authoritative installed `version=` value from `/var/lib/linux-cli-setup/install.env`, compares it with the target version, and reports whether it is upgrading, refreshing an equivalent version, or running an older checkout than the installed version. A legacy installation without saved version state is marked unknown and receives the current version when update completes successfully. Installed version state is available through `lcsversion`.
+
+Install and update runs create a persistent log under `/var/log/linux-cli-setup/` and print the exact log path at the end of successful, failed, and interrupted runs. Package-manager output is hidden by default; the console shows each item being installed or updated. If a required step fails, the scripts show the error plus the last captured output for that item and roll back managed changes from that run. Package-manager system upgrades cannot be fully reversed by any shell script, but project-managed files and packages installed by the current run are rolled back where possible.
 
 ## Uninstall
 
@@ -293,12 +296,16 @@ time-status
 ntp-status
 timecheck
 ntpcheck
+updatecheck
+internetcheck
+lcsversion
+needs-reboot
 aliases
 drivecheck
 dockercheck
 ```
 
-The `aliases` command prints the Fish abbreviations and aliases visible to the current user. `timecheck` shows chrony and NTP source details, and `ntpcheck` is installed as an alias to it.
+The `aliases` command prints the Fish abbreviations and aliases visible to the current user. `timecheck` shows chrony and NTP source details, and `ntpcheck` is installed as an alias to it. `updatecheck` refreshes and lists APT or pacman/AUR OS updates, asks for confirmation, and installs them only after approval. `internetcheck` checks external IP, Cloudflare latency, every detected DNS server, DNS query latency, and a bounded Cloudflare speed test using approximately 50 MB down and 20 MB up; use `internetcheck --skip-speed` to avoid the transfer. Cloudflare may collect speed-test measurement data for aggregate network insights. `needs-reboot` checks Debian/Ubuntu reboot markers and core system files updated since boot, returning exit status `1` when a reboot is recommended. `lcsversion` reads managed install state and remains available after uninstall so it can report that linux-cli-setup is not installed.
 
 ## Automatic Updates
 
@@ -328,7 +335,7 @@ sudo ./install.sh --motd combine
 
 `replace` is the noninteractive default and hides existing MOTD entries so the linux-cli-setup dynamic status is shown by itself. `keep` leaves the existing MOTD alone and removes linux-cli-setup login MOTD hooks. `combine` shows the existing MOTD first, then the linux-cli-setup dynamic status block. If no MOTD option is provided in an interactive run and no saved MOTD mode exists, the installer asks which mode to use.
 
-For replace and combine modes, the installed MOTD command uses UniFetch with OS-matched ASCII art, local IP, public IP, package, CPU, GPU, memory, disk, user, and locale details when `unifetch` is installed. If UniFetch is unavailable or fails, it falls back to the built-in linux-cli-setup status block. Arch/Garuda installs try `unifetch` as an optional core package through pacman or yay/AUR. Debian/Ubuntu installs do not add a third-party UniFetch repository; they use UniFetch only when the command already exists.
+For replace and combine modes, the installed MOTD command uses UniFetch with OS-matched ASCII art when `unifetch` is installed. Both the UniFetch and built-in views show the OS and kernel, memory, each distinct mounted local filesystem, currently mounted NFS filesystems, remaining storage, local IP, internet/public-IP status, load average, cached package-update status, UFW and SSH status, and whether a reboot may be required. Network and storage probes have short timeouts so an unavailable service or stale mount does not hold up login. Arch/Garuda installs try `unifetch` as an optional core package through pacman or yay/AUR. Debian/Ubuntu installs do not add a third-party UniFetch repository; they use UniFetch only when the command already exists.
 
 On systems with `/etc/update-motd.d`, the installer uses `99-linux-cli-setup` so combined MOTD output appears after existing distro entries. On systems without `/etc/update-motd.d`, replace and combine modes use a Fish login hook under `/etc/fish/conf.d/`. `LINUX_CLI_MOTD_MODE=keep|replace|combine` is also supported.
 

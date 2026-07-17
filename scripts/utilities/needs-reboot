@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+#
+# Report whether Debian/Ubuntu or Arch system components changed after boot.
+
+set -euo pipefail
+
+VERSION="0.5b"
+COMMAND_NAME="$(basename "$0")"
+
+show_help() {
+    cat <<HELP
+Usage: $COMMAND_NAME [--version] [--help]
+
+Report whether the system appears to require a reboot. Exit 0 when no reboot
+is needed and exit 1 when a reboot is recommended.
+HELP
+}
+
+case "${1:-}" in
+    "")
+        ;;
+    --version)
+        printf '%s %s\n' "$COMMAND_NAME" "$VERSION"
+        exit 0
+        ;;
+    --help)
+        show_help
+        exit 0
+        ;;
+    *)
+        printf 'Unknown option: %s\n' "$1" >&2
+        exit 2
+        ;;
+esac
+
+if [[ "$#" -gt 1 ]]; then
+    printf 'Unexpected extra arguments.\n' >&2
+    exit 2
+fi
+
+boot_time="$(stat -c %Y /proc/1)"
+
+needs_reboot=0
+reason=""
+
+if [[ -f /run/reboot-required || -f /var/run/reboot-required ]]; then
+    needs_reboot=1
+    reason="Debian/Ubuntu reboot-required marker exists"
+fi
+
+# Compare commonly replaced kernel and core system files with the current boot.
+core_files=(
+    /boot/vmlinuz-linux
+    /boot/vmlinuz-linux-lts
+    /usr/lib/modules
+    /usr/lib/libc.so.6
+    /usr/lib/systemd/systemd
+)
+
+for core_file in "${core_files[@]}"; do
+    if [[ -e "$core_file" ]]; then
+        modified="$(stat -c %Y "$core_file")"
+        if (( modified > boot_time )); then
+            needs_reboot=1
+            reason="System component ($core_file) was updated after boot"
+            break
+        fi
+    fi
+done
+
+if [[ "$needs_reboot" -eq 1 ]]; then
+    printf 'System requires a reboot. (%s)\n' "$reason"
+    exit 1
+fi
+
+printf 'No reboot required.\n'
