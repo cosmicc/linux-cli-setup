@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Added `updatecheck` for listing and interactively installing APT, pacman, and AUR OS package updates.
 - Added `internetcheck` for external-IP, latency, configured DNS, DNS-query, and bounded Cloudflare throughput diagnostics.
 - Added `lcsversion` plus installed-version state under `/usr/local/share/linux-cli-setup/VERSION`.
+- Added the managed `needs-reboot` utility for Debian/Ubuntu reboot markers and post-boot kernel/core system updates.
 - Added `bind`/`bind9-dnsutils`, `fping`, and `iproute2` to required core packages for baseline network diagnostics.
 - Added remaining-space details for every distinct mounted local filesystem and currently mounted NFS filesystem to both MOTD display paths.
 - Added OS/version, cached package-update status, UFW status, and internet connectivity details to the built-in MOTD, with matching host-health details in the UniFetch view.

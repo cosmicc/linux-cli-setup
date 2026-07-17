@@ -299,12 +299,13 @@ ntpcheck
 updatecheck
 internetcheck
 lcsversion
+needs-reboot
 aliases
 drivecheck
 dockercheck
 ```
 
-The `aliases` command prints the Fish abbreviations and aliases visible to the current user. `timecheck` shows chrony and NTP source details, and `ntpcheck` is installed as an alias to it. `updatecheck` refreshes and lists APT or pacman/AUR OS updates, asks for confirmation, and installs them only after approval. `internetcheck` checks external IP, Cloudflare latency, every detected DNS server, DNS query latency, and a bounded Cloudflare speed test; use `internetcheck --skip-speed` to avoid the transfer. Cloudflare may collect speed-test measurement data for aggregate network insights. `lcsversion` reads managed install state and remains available after uninstall so it can report that linux-cli-setup is not installed.
+The `aliases` command prints the Fish abbreviations and aliases visible to the current user. `timecheck` shows chrony and NTP source details, and `ntpcheck` is installed as an alias to it. `updatecheck` refreshes and lists APT or pacman/AUR OS updates, asks for confirmation, and installs them only after approval. `internetcheck` checks external IP, Cloudflare latency, every detected DNS server, DNS query latency, and a bounded Cloudflare speed test; use `internetcheck --skip-speed` to avoid the transfer. Cloudflare may collect speed-test measurement data for aggregate network insights. `needs-reboot` checks Debian/Ubuntu reboot markers and core system files updated since boot, returning exit status `1` when a reboot is recommended. `lcsversion` reads managed install state and remains available after uninstall so it can report that linux-cli-setup is not installed.
 
 ## Automatic Updates
 
