@@ -7,6 +7,7 @@ set -Eeuo pipefail
 COMMON_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "$COMMON_SCRIPT_DIR/../.." && pwd)"
 VERSION_FILE="$PROJECT_ROOT/VERSION"
+INSTALLED_VERSION_FILE="/usr/local/share/linux-cli-setup/VERSION"
 FISH_TEMPLATE_DIR="$PROJECT_ROOT/templates/fish"
 SSH_TEMPLATE_DIR="$PROJECT_ROOT/templates/ssh"
 SYSCTL_TEMPLATE_DIR="$PROJECT_ROOT/templates/sysctl"
@@ -362,6 +363,27 @@ project_version() {
 
 print_version() {
     printf 'linux-cli-setup %s\n' "$(project_version)"
+}
+
+installed_project_version() {
+    local saved_version
+
+    if [[ -f "$INSTALLED_VERSION_FILE" ]]; then
+        tr -d '[:space:]' < "$INSTALLED_VERSION_FILE"
+        return
+    fi
+
+    saved_version="$(read_state_value version || true)"
+    if [[ -n "$saved_version" ]]; then
+        printf '%s' "$saved_version"
+        return
+    fi
+
+    printf 'unknown (legacy install)'
+}
+
+install_runtime_version_file() {
+    install_owned_file "$VERSION_FILE" "$INSTALLED_VERSION_FILE" 0644 root root
 }
 
 version_sort_key() {
@@ -1086,6 +1108,7 @@ write_install_state() {
         printf 'profiles=%s\n' "$profiles_csv"
         printf 'original_shell=%s\n' "$original_shell"
         printf 'motd_mode=%s\n' "${motd_mode:-replace}"
+        printf 'version=%s\n' "$(project_version)"
         printf 'updated_at=%s\n' "$(date -Iseconds)"
     } > "$STATE_FILE"
     chmod 0644 "$STATE_FILE"
@@ -1122,6 +1145,81 @@ install_owned_file() {
     fi
 
     run_step "Installing file" "$destination" install -o "$owner" -g "$group" -m "$mode" "$source" "$destination"
+}
+
+is_update_operation() {
+    [[ "${LINUX_CLI_OPERATION:-install}" == "update" ]]
+}
+
+install_config_file() {
+    local source="$1"
+    local destination="$2"
+    local mode="$3"
+    local owner="$4"
+    local group="$5"
+
+    if is_update_operation && [[ -e "$destination" || -L "$destination" ]]; then
+        log "Preserving existing configuration file byte-for-byte: $destination"
+        return 0
+    fi
+
+    install_owned_file "$source" "$destination" "$mode" "$owner" "$group"
+}
+
+install_config_file_optional() {
+    local source="$1"
+    local destination="$2"
+    local mode="$3"
+    local owner="$4"
+    local group="$5"
+
+    if is_update_operation && [[ -e "$destination" || -L "$destination" ]]; then
+        log "Preserving existing optional configuration file byte-for-byte: $destination"
+        return 0
+    fi
+
+    install_owned_file_optional "$source" "$destination" "$mode" "$owner" "$group"
+}
+
+merge_missing_shell_settings() {
+    local source="$1"
+    local destination="$2"
+    local mode="$3"
+    local owner="$4"
+    local group="$5"
+    local added=0
+    local backup
+    local key
+    local line
+    local merged
+
+    [[ -f "$source" && -f "$destination" ]] || return 0
+    merged="$(mktemp)"
+    cp -p "$destination" "$merged"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^([A-Z][A-Z0-9_]*)= ]] || continue
+        key="${BASH_REMATCH[1]}"
+        grep -Eq "^${key}=" "$destination" && continue
+        if [[ "$added" -eq 0 ]]; then
+            printf '\n# Settings added by linux-cli-setup update.sh\n' >> "$merged"
+        fi
+        printf '%s\n' "$line" >> "$merged"
+        added=$((added + 1))
+    done < "$source"
+
+    if [[ "$added" -eq 0 ]]; then
+        rm -f "$merged"
+        log "No new settings were needed in $destination"
+        return 0
+    fi
+
+    backup="${destination}.linux-cli-setup.${TIMESTAMP}.bak"
+    run_step "Backing up" "$destination" cp -p "$destination" "$backup"
+    record_rollback_cmd "cp -p $(shell_quote "$backup") $(shell_quote "$destination")"
+    run_step "Adding settings" "$destination" install -o "$owner" -g "$group" -m "$mode" "$merged" "$destination"
+    rm -f "$merged"
+    log "Added $added missing setting(s) without changing existing settings in $destination"
 }
 
 install_owned_symlink() {
@@ -1539,6 +1637,22 @@ update_package_database_and_system() {
 cleanup_unused_packages_and_cache() {
     local orphan_packages=()
 
+    if is_update_operation; then
+        log "Preserving installed packages during update and cleaning package caches only"
+        case "$PACKAGE_FAMILY" in
+            debian)
+                export DEBIAN_FRONTEND=noninteractive
+                run_step_optional "Cleaning" "apt package cache" apt-get autoclean -y || true
+                ;;
+            arch)
+                if command -v paccache >/dev/null 2>&1; then
+                    run_step_optional "Cleaning" "pacman package cache" paccache -rk2 || true
+                fi
+                ;;
+        esac
+        return 0
+    fi
+
     log "Removing unused packages and cleaning package cache"
     case "$PACKAGE_FAMILY" in
         debian)
@@ -1722,6 +1836,14 @@ configure_ufw_firewall() {
         return
     fi
 
+    if is_update_operation; then
+        log "Preserving existing UFW rules and defaults during update."
+        if systemd_available && systemctl list-unit-files --no-legend ufw.service 2>/dev/null | grep -q '^ufw\.service'; then
+            run_step_optional "Enabling service" "ufw.service" systemctl enable --now ufw.service || true
+        fi
+        return 0
+    fi
+
     log "Configuring UFW firewall defaults"
     if ufw status 2>/dev/null | grep -qi '^Status: active'; then
         was_active=1
@@ -1826,7 +1948,7 @@ configure_sshd_hardening() {
         return 0
     fi
 
-    install_owned_file_optional "$sshd_template" "$sshd_destination" 0644 root root
+    install_config_file_optional "$sshd_template" "$sshd_destination" 0644 root root
 
     if ! sshd_command="$(sshd_binary)"; then
         warn "OpenSSH daemon binary was not found; skipping sshd config validation."
@@ -1835,6 +1957,11 @@ configure_sshd_hardening() {
 
     if run_step_optional "Validating" "OpenSSH daemon configuration" "$sshd_command" -t; then
         reload_openssh_service_optional
+        return 0
+    fi
+
+    if is_update_operation; then
+        warn "OpenSSH validation failed; preserving the existing hardening snippet during non-destructive update."
         return 0
     fi
 
@@ -1849,7 +1976,7 @@ configure_debian_apt_hardening() {
 
     log "Hardening: configuring apt to reject unauthenticated or insecure repositories"
     if [[ -f "$apt_template" ]]; then
-        install_owned_file_optional "$apt_template" /etc/apt/apt.conf.d/80-linux-cli-setup-hardening 0644 root root
+        install_config_file_optional "$apt_template" /etc/apt/apt.conf.d/80-linux-cli-setup-hardening 0644 root root
     else
         warn "Missing apt hardening template: $apt_template"
     fi
@@ -1860,7 +1987,7 @@ apply_basic_os_hardening() {
 
     log "Hardening: applying kernel, filesystem, network, and login protections"
     if [[ -f "$sysctl_template" ]]; then
-        install_owned_file_optional "$sysctl_template" /etc/sysctl.d/99-linux-cli-setup-hardening.conf 0644 root root
+        install_config_file_optional "$sysctl_template" /etc/sysctl.d/99-linux-cli-setup-hardening.conf 0644 root root
         run_step_optional "Applying" "sysctl hardening settings" sysctl --system || true
     else
         warn "Missing sysctl hardening template: $sysctl_template"
@@ -1903,7 +2030,7 @@ configure_performance_tuning() {
     esac
 
     if [[ -f "$sysctl_template" ]]; then
-        install_owned_file_optional "$sysctl_template" /etc/sysctl.d/99-linux-cli-setup-performance.conf 0644 root root
+        install_config_file_optional "$sysctl_template" /etc/sysctl.d/99-linux-cli-setup-performance.conf 0644 root root
         run_step_optional "Applying" "sysctl performance settings" sysctl --system || true
     else
         warn "Missing performance sysctl template: $sysctl_template"
@@ -1916,20 +2043,32 @@ configure_performance_tuning() {
     fi
 }
 
+set_git_default() {
+    local key="$1"
+    local value="$2"
+
+    if is_update_operation && run_as_target git config --global --get "$key" >/dev/null 2>&1; then
+        log "Preserving existing Git setting: $key"
+        return 0
+    fi
+
+    run_step "Configuring" "Git $key" run_as_target git config --global "$key" "$value"
+}
+
 configure_git_defaults() {
-    log "Applying Git defaults for $TARGET_USER"
-    run_step "Configuring" "Git init.defaultBranch" run_as_target git config --global init.defaultBranch main
-    run_step "Configuring" "Git pull.ff" run_as_target git config --global pull.ff only
-    run_step "Configuring" "Git fetch.prune" run_as_target git config --global fetch.prune true
-    run_step "Configuring" "Git merge.conflictstyle" run_as_target git config --global merge.conflictstyle zdiff3
-    run_step "Configuring" "Git rerere.enabled" run_as_target git config --global rerere.enabled true
-    run_step "Configuring" "Git core.editor" run_as_target git config --global core.editor nvim
+    log "Applying missing Git defaults for $TARGET_USER"
+    set_git_default init.defaultBranch main
+    set_git_default pull.ff only
+    set_git_default fetch.prune true
+    set_git_default merge.conflictstyle zdiff3
+    set_git_default rerere.enabled true
+    set_git_default core.editor nvim
 
     if run_as_target bash -lc 'command -v delta >/dev/null 2>&1'; then
-        run_step "Configuring" "Git delta pager" run_as_target git config --global core.pager delta
-        run_step "Configuring" "Git delta diff filter" run_as_target git config --global interactive.diffFilter 'delta --color-only'
-        run_step "Configuring" "Git delta navigation" run_as_target git config --global delta.navigate true
-        run_step "Configuring" "Git delta side-by-side" run_as_target git config --global delta.side-by-side true
+        set_git_default core.pager delta
+        set_git_default interactive.diffFilter 'delta --color-only'
+        set_git_default delta.navigate true
+        set_git_default delta.side-by-side true
     fi
 }
 
@@ -1944,7 +2083,7 @@ install_fish_function_templates() {
     for function_name in "$@"; do
         function_template="$FISH_TEMPLATE_DIR/functions/${function_name}.fish"
         if [[ -f "$function_template" ]]; then
-            install_owned_file "$function_template" "$fish_config_dir/functions/${function_name}.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
+            install_config_file "$function_template" "$fish_config_dir/functions/${function_name}.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
         else
             warn "Fish function template not found: $function_template"
         fi
@@ -1956,8 +2095,8 @@ configure_fish_files() {
 
     log "Installing Fish configuration for $TARGET_USER"
     install -o "$TARGET_USER" -g "$TARGET_GROUP" -d "$fish_config_dir" "$fish_config_dir/conf.d"
-    install_owned_file "$FISH_TEMPLATE_DIR/config.fish" "$fish_config_dir/config.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
-    install_owned_file "$FISH_TEMPLATE_DIR/fish_plugins" "$fish_config_dir/fish_plugins" 0644 "$TARGET_USER" "$TARGET_GROUP"
+    install_config_file "$FISH_TEMPLATE_DIR/config.fish" "$fish_config_dir/config.fish" 0644 "$TARGET_USER" "$TARGET_GROUP"
+    install_config_file "$FISH_TEMPLATE_DIR/fish_plugins" "$fish_config_dir/fish_plugins" 0644 "$TARGET_USER" "$TARGET_GROUP"
 
     if profile_is_selected comfort; then
         install_fish_function_templates "${COMFORT_FISH_FUNCTIONS[@]}"
@@ -1980,17 +2119,39 @@ install_fisher_plugins() {
 }
 
 update_fisher_plugins() {
-    local plugin_list
+    local fish_plugins_backup=""
+    local fish_plugins_file="$TARGET_HOME/.config/fish/fish_plugins"
+    local update_rc=0
 
     if ! command -v fish >/dev/null 2>&1; then
         warn "Fish is not installed; skipping Fisher plugin update"
         return
     fi
 
+    if [[ -f "$fish_plugins_file" ]]; then
+        fish_plugins_backup="$(mktemp)"
+        cp -p -- "$fish_plugins_file" "$fish_plugins_backup"
+    fi
+
     log "Updating Fisher plugins for $TARGET_USER"
-    plugin_list="$(grep -Ev '^[[:space:]]*(#|$)' "$FISH_TEMPLATE_DIR/fish_plugins" | tr '\n' ' ')"
-    run_step "Updating" "Fisher plugins" run_as_target fish -lc "if functions -q fisher; fisher install $plugin_list; and fisher update; else exit 0; end"
-    run_step "Configuring" "Tide prompt" run_as_target fish "$FISH_TEMPLATE_DIR/configure_tide.fish"
+    if run_step "Updating" "registered Fisher plugins" run_as_target fish -lc "if functions -q fisher; fisher update; else exit 0; end"; then
+        update_rc=0
+    else
+        update_rc=$?
+    fi
+
+    if [[ -n "$fish_plugins_backup" ]]; then
+        if [[ ! -f "$fish_plugins_file" ]] || ! cmp -s "$fish_plugins_backup" "$fish_plugins_file"; then
+            run_step "Restoring configuration" "$fish_plugins_file" cp -p -- "$fish_plugins_backup" "$fish_plugins_file"
+        fi
+        rm -f -- "$fish_plugins_backup"
+    fi
+
+    if [[ "$update_rc" -ne 0 ]]; then
+        return "$update_rc"
+    fi
+
+    log "Preserving existing Tide prompt settings during update."
 }
 
 configure_ssh_client_defaults() {
@@ -2012,7 +2173,7 @@ configure_ssh_client_defaults() {
     fi
 
     run_step "Creating directory" "$ssh_dir" install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0700 -d "$ssh_dir" "$ssh_dir/conf.d" "$ssh_dir/controlmasters"
-    install_owned_file "$SSH_TEMPLATE_DIR/00-defaults.conf" "$ssh_dir/conf.d/00-defaults.conf" 0600 "$TARGET_USER" "$TARGET_GROUP"
+    install_config_file "$SSH_TEMPLATE_DIR/00-defaults.conf" "$ssh_dir/conf.d/00-defaults.conf" 0600 "$TARGET_USER" "$TARGET_GROUP"
 
     if [[ -L "$ssh_config" ]]; then
         warn "Skipping SSH include update because $ssh_config is a symlink."
@@ -2020,8 +2181,17 @@ configure_ssh_client_defaults() {
     fi
 
     if [[ -f "$ssh_config" ]] && grep -Fxq "$include_line" "$ssh_config"; then
-        run_step "Securing file" "$ssh_config" chmod 0600 "$ssh_config"
-        run_step "Setting ownership" "$ssh_config" chown "$TARGET_USER:$TARGET_GROUP" "$ssh_config"
+        if is_update_operation; then
+            log "Preserving existing SSH client configuration byte-for-byte: $ssh_config"
+        else
+            run_step "Securing file" "$ssh_config" chmod 0600 "$ssh_config"
+            run_step "Setting ownership" "$ssh_config" chown "$TARGET_USER:$TARGET_GROUP" "$ssh_config"
+        fi
+        return
+    fi
+
+    if is_update_operation && [[ -f "$ssh_config" ]]; then
+        log "Preserving existing SSH client configuration; not adding a missing Include line during update: $ssh_config"
         return
     fi
 
@@ -2079,7 +2249,7 @@ reenable_motd_snippets() {
 
 install_unifetch_motd_config() {
     log "Installing UniFetch MOTD configuration"
-    install_owned_file "$UNIFETCH_MOTD_CONFIG_TEMPLATE" "$UNIFETCH_MOTD_CONFIG" 0644 root root
+    install_config_file "$UNIFETCH_MOTD_CONFIG_TEMPLATE" "$UNIFETCH_MOTD_CONFIG" 0644 root root
 }
 
 remove_unifetch_motd_config() {
@@ -2135,7 +2305,7 @@ install_motd() {
 
     log "No /etc/update-motd.d directory found; installing Fish login MOTD hook"
     run_step "Creating directory" "/etc/fish/conf.d" install -m 0755 -d /etc/fish/conf.d
-    install_owned_file "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish" /etc/fish/conf.d/linux-cli-motd.fish 0644 root root
+    install_config_file "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish" /etc/fish/conf.d/linux-cli-motd.fish 0644 root root
 }
 
 enable_arch_helpers() {
@@ -2273,7 +2443,7 @@ install_debian_docker_official() {
         printf 'Architectures: %s\n' "$arch"
         printf 'Signed-By: /etc/apt/keyrings/docker.asc\n'
     } > "$docker_sources_tmp"
-    install_owned_file "$docker_sources_tmp" /etc/apt/sources.list.d/docker.sources 0644 root root
+    install_config_file "$docker_sources_tmp" /etc/apt/sources.list.d/docker.sources 0644 root root
     rm -f "$docker_sources_tmp"
 
     run_step "Updating" "apt package indexes for Docker repository" apt-get update
@@ -2574,33 +2744,39 @@ configure_time_sync() {
     local chrony_service
     local chrony_config
 
-    old_timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
-
-    if [[ -n "$old_timezone" ]]; then
-        record_rollback_cmd "timedatectl set-timezone $(shell_quote "$old_timezone")"
-    fi
-
-    if command -v timedatectl >/dev/null 2>&1; then
-        run_step "Configuring timezone" "America/Detroit" timedatectl set-timezone America/Detroit
+    if is_update_operation; then
+        log "Preserving existing timezone and time-service selection during update."
     else
-        [[ -f /etc/localtime ]] && backup_existing_path /etc/localtime
-        [[ -f /etc/timezone ]] && backup_existing_path /etc/timezone
-        run_step "Configuring timezone" "/etc/localtime" ln -snf /usr/share/zoneinfo/America/Detroit /etc/localtime
-        printf '%s\n' "America/Detroit" > /etc/timezone
+        old_timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+
+        if [[ -n "$old_timezone" ]]; then
+            record_rollback_cmd "timedatectl set-timezone $(shell_quote "$old_timezone")"
+        fi
+
+        if command -v timedatectl >/dev/null 2>&1; then
+            run_step "Configuring timezone" "America/Detroit" timedatectl set-timezone America/Detroit
+        else
+            [[ -f /etc/localtime ]] && backup_existing_path /etc/localtime
+            [[ -f /etc/timezone ]] && backup_existing_path /etc/timezone
+            run_step "Configuring timezone" "/etc/localtime" ln -snf /usr/share/zoneinfo/America/Detroit /etc/localtime
+            printf '%s\n' "America/Detroit" > /etc/timezone
+        fi
     fi
 
     log "Configuring chrony for DHCP-provided NTP servers with us.pool.ntp.org fallback"
-    disable_legacy_time_sync_service
+    if ! is_update_operation; then
+        disable_legacy_time_sync_service
+    fi
     chrony_service="$(chrony_service_name)"
     chrony_config="$(chrony_config_path)"
 
     run_step "Creating directory" "/etc/chrony/sources.d" install -m 0755 -d /etc/chrony/sources.d
     run_step "Creating directory" "/run/chrony-dhcp" install -m 0755 -d /run/chrony-dhcp
-    install_owned_file "$CHRONY_TEMPLATE_DIR/chrony.conf" "$chrony_config" 0644 root root
-    install_owned_file "$CHRONY_TEMPLATE_DIR/tmpfiles.conf" /etc/tmpfiles.d/linux-cli-chrony.conf 0644 root root
+    install_config_file "$CHRONY_TEMPLATE_DIR/chrony.conf" "$chrony_config" 0644 root root
+    install_config_file "$CHRONY_TEMPLATE_DIR/tmpfiles.conf" /etc/tmpfiles.d/linux-cli-chrony.conf 0644 root root
     install_owned_file "$CHRONY_TEMPLATE_DIR/chrony-dhcp-source" /usr/local/sbin/linux-cli-chrony-dhcp-source 0755 root root
-    install_owned_file "$CHRONY_TEMPLATE_DIR/networkmanager-dispatcher" /etc/NetworkManager/dispatcher.d/20-linux-cli-chrony-dhcp 0755 root root
-    install_owned_file "$CHRONY_TEMPLATE_DIR/dhclient-exit-hook" /etc/dhcp/dhclient-exit-hooks.d/linux-cli-chrony 0644 root root
+    install_config_file "$CHRONY_TEMPLATE_DIR/networkmanager-dispatcher" /etc/NetworkManager/dispatcher.d/20-linux-cli-chrony-dhcp 0755 root root
+    install_config_file "$CHRONY_TEMPLATE_DIR/dhclient-exit-hook" /etc/dhcp/dhclient-exit-hooks.d/linux-cli-chrony 0644 root root
 
     if command -v systemd-tmpfiles >/dev/null 2>&1; then
         run_step_optional "Creating runtime directory" "/run/chrony-dhcp" systemd-tmpfiles --create /etc/tmpfiles.d/linux-cli-chrony.conf || true
@@ -2616,7 +2792,7 @@ configure_time_sync() {
 
 configure_fail2ban() {
     log "Configuring fail2ban for SSH protection"
-    install_owned_file "$FAIL2BAN_TEMPLATE_DIR/jail.d/linux-cli-setup.conf" /etc/fail2ban/jail.d/linux-cli-setup.conf 0644 root root
+    install_config_file "$FAIL2BAN_TEMPLATE_DIR/jail.d/linux-cli-setup.conf" /etc/fail2ban/jail.d/linux-cli-setup.conf 0644 root root
 
     if systemd_available; then
         run_step "Enabling service" "fail2ban.service" systemctl enable --now fail2ban.service
@@ -2628,17 +2804,11 @@ configure_fail2ban() {
 
 configure_logrotate() {
     log "Configuring logrotate for linux-cli-setup logs"
-    install_owned_file "$LOGROTATE_TEMPLATE_DIR/linux-cli-setup" /etc/logrotate.d/linux-cli-setup 0644 root root
+    install_config_file "$LOGROTATE_TEMPLATE_DIR/linux-cli-setup" /etc/logrotate.d/linux-cli-setup 0644 root root
 }
 
 install_auto_update_config() {
     local config_tmp
-
-    if [[ -f "$AUTO_UPDATE_CONFIG" ]]; then
-        run_step "Securing file" "$AUTO_UPDATE_CONFIG" chmod 0600 "$AUTO_UPDATE_CONFIG"
-        remove_legacy_auto_update_config
-        return
-    fi
 
     config_tmp="$(mktemp)"
     sed \
@@ -2647,10 +2817,20 @@ install_auto_update_config() {
         -e "s|^PUSHOVER_API_TOKEN=.*|PUSHOVER_API_TOKEN=\"${PUSHOVER_API_TOKEN:-}\"|" \
         "$AUTO_UPDATE_TEMPLATE_DIR/auto-update.conf" > "$config_tmp"
 
+    if [[ -f "$AUTO_UPDATE_CONFIG" ]]; then
+        if is_update_operation; then
+            merge_missing_shell_settings "$config_tmp" "$AUTO_UPDATE_CONFIG" 0600 root root
+        fi
+        run_step "Securing file" "$AUTO_UPDATE_CONFIG" chmod 0600 "$AUTO_UPDATE_CONFIG"
+        rm -f "$config_tmp"
+        remove_legacy_auto_update_config
+        return
+    fi
+
     if [[ -f "$LEGACY_AUTO_UPDATE_CONFIG" ]]; then
-        install_owned_file "$LEGACY_AUTO_UPDATE_CONFIG" "$AUTO_UPDATE_CONFIG" 0600 root root
+        install_config_file "$LEGACY_AUTO_UPDATE_CONFIG" "$AUTO_UPDATE_CONFIG" 0600 root root
     else
-        install_owned_file "$config_tmp" "$AUTO_UPDATE_CONFIG" 0600 root root
+        install_config_file "$config_tmp" "$AUTO_UPDATE_CONFIG" 0600 root root
     fi
 
     rm -f "$config_tmp"
@@ -2659,6 +2839,11 @@ install_auto_update_config() {
 
 remove_legacy_auto_update_config() {
     local default_config
+
+    if is_update_operation; then
+        debug "Preserving legacy auto-update configuration during non-destructive update."
+        return 0
+    fi
 
     if [[ ! -e "$LEGACY_AUTO_UPDATE_CONFIG" && ! -L "$LEGACY_AUTO_UPDATE_CONFIG" ]]; then
         return
@@ -2680,6 +2865,11 @@ remove_legacy_auto_update_config() {
 }
 
 remove_legacy_auto_update_command() {
+    if is_update_operation; then
+        debug "Preserving legacy auto-update command during non-destructive update."
+        return 0
+    fi
+
     if [[ ! -e "$LEGACY_AUTO_UPDATE_COMMAND" && ! -L "$LEGACY_AUTO_UPDATE_COMMAND" ]]; then
         return
     fi
@@ -2704,7 +2894,7 @@ install_cron_fallback_if_needed() {
             ;;
     esac
 
-    install_owned_file "$CRON_TEMPLATE_DIR/linux-cli-auto-update" /etc/cron.d/linux-cli-auto-update 0644 root root
+    install_config_file "$CRON_TEMPLATE_DIR/linux-cli-auto-update" /etc/cron.d/linux-cli-auto-update 0644 root root
 
     if systemd_available; then
         if systemctl list-unit-files --no-legend cron.service 2>/dev/null | grep -q '^cron\.service'; then
@@ -2721,8 +2911,8 @@ install_auto_update_service() {
     remove_legacy_auto_update_command
 
     if systemd_available; then
-        install_owned_file "$SYSTEMD_TEMPLATE_DIR/linux-cli-auto-update.service" /etc/systemd/system/linux-cli-auto-update.service 0644 root root
-        install_owned_file "$SYSTEMD_TEMPLATE_DIR/linux-cli-auto-update.timer" /etc/systemd/system/linux-cli-auto-update.timer 0644 root root
+        install_config_file "$SYSTEMD_TEMPLATE_DIR/linux-cli-auto-update.service" /etc/systemd/system/linux-cli-auto-update.service 0644 root root
+        install_config_file "$SYSTEMD_TEMPLATE_DIR/linux-cli-auto-update.timer" /etc/systemd/system/linux-cli-auto-update.timer 0644 root root
         run_step "Reloading" "systemd manager configuration" systemctl daemon-reload
         run_step "Enabling timer" "linux-cli-auto-update.timer" systemctl enable --now linux-cli-auto-update.timer
         return

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Install or refresh common CLI tooling, selected profile packages, Fish shell,
-# Fisher/Tide prompt configuration, and a dynamic login MOTD for the user who
-# invoked sudo.
+# Install or non-destructively update common CLI tooling, selected profile
+# packages, Fish shell, Fisher/Tide prompt configuration, and a dynamic login
+# MOTD for the user who invoked sudo.
 
 set -euo pipefail
 
@@ -16,7 +16,7 @@ show_help() {
     cat <<'HELP'
 Usage: sudo ./install.sh [options]
 
-Install or refresh the Linux CLI setup and optional package groups.
+Install the Linux CLI setup and optional package groups.
 
 Options:
   --profile NAME[,NAME]   Install one or more groups in addition to core.
@@ -37,33 +37,55 @@ Environment:
   LINUX_CLI_DOCKER_APT_SOURCE=distro   Use distro Docker packages instead of Docker's official apt repo.
   LINUX_CLI_ENABLE_CARGO_FALLBACKS=0   Skip cargo source-build fallbacks for comfort tools.
 
-If no group option is provided on a new system, only core is installed. If a
-previous linux-cli-setup install is detected, saved profiles are refreshed.
+If no group option is provided, only core is installed. If linux-cli-setup is
+already installed, exit and run update.sh instead.
 HELP
 }
 
-select_install_profiles() {
+select_operation_profiles() {
+    local requested_profiles
     local saved_profiles
 
-    if [[ "$PROFILES_EXPLICIT" -eq 1 ]]; then
+    if [[ "${LINUX_CLI_OPERATION:-install}" == "install" ]]; then
         INSTALL_MODE=install
         return
     fi
 
-    if install_state_exists; then
-        INSTALL_MODE=update
+    INSTALL_MODE=update
+    if [[ "$PROFILES_EXPLICIT" -eq 1 ]]; then
+        requested_profiles="$(selected_profiles_csv)"
         saved_profiles="$(state_profiles)"
         SELECTED_PROFILES=()
         add_profile_csv "$saved_profiles"
+        add_profile_csv "$requested_profiles"
         ensure_core_profile_first
-        log "Everything was installed already; running install.sh in update mode for saved profiles: $(selected_profiles_csv)"
+        log "Updating saved profiles plus requested profiles: $(selected_profiles_csv)"
         return
     fi
 
-    INSTALL_MODE=install
+    saved_profiles="$(state_profiles)"
     SELECTED_PROFILES=()
-    add_profile core
-    log "No existing linux-cli-setup installation detected and no profiles were specified; installing core only."
+    add_profile_csv "$saved_profiles"
+    ensure_core_profile_first
+    log "Updating saved profiles: $(selected_profiles_csv)"
+}
+
+validate_operation_state() {
+    case "${LINUX_CLI_OPERATION:-install}" in
+        install)
+            if install_state_exists; then
+                die "linux-cli-setup is already installed. Run sudo ./update.sh to update the existing installation."
+            fi
+            ;;
+        update)
+            if ! install_state_exists; then
+                die "linux-cli-setup is not installed. Run sudo ./install.sh before running update.sh."
+            fi
+            ;;
+        *)
+            die "Unknown setup operation: ${LINUX_CLI_OPERATION:-}"
+            ;;
+    esac
 }
 
 sync_selected_profiles() {
@@ -112,13 +134,23 @@ main() {
     fi
 
     require_root
-    init_logging install
+    init_logging "${LINUX_CLI_OPERATION:-install}"
     init_package_family
+    log "Running ${LINUX_CLI_OPERATION:-install}.sh with linux-cli-setup version $(project_version)."
+    if [[ "${LINUX_CLI_OPERATION:-install}" == "update" ]]; then
+        if install_state_exists; then
+            log "Installed linux-cli-setup version: $(installed_project_version)"
+        else
+            log "Installed linux-cli-setup version: not installed"
+        fi
+        log "Target linux-cli-setup version for this update: $(project_version)"
+    fi
+    validate_operation_state
     self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     start_transaction
     register_transaction_traps
     init_runtime_context
-    select_install_profiles
+    select_operation_profiles
     resolve_motd_mode
     if [[ "$INSTALL_MODE" == "update" ]]; then
         PACKAGE_STEP_VERB="Updating"
@@ -148,10 +180,15 @@ main() {
     configure_git_defaults
     configure_fish_files
     configure_ssh_client_defaults
-    install_fisher_plugins
-    set_default_shell
+    if [[ "$INSTALL_MODE" == "update" ]]; then
+        update_fisher_plugins
+    else
+        install_fisher_plugins
+        set_default_shell
+    fi
     install_motd
     cleanup_unused_packages_and_cache
+    install_runtime_version_file
     write_install_state "$(selected_profiles_csv)" "$ORIGINAL_SHELL" "$MOTD_MODE"
     commit_transaction
     clear_transaction_traps

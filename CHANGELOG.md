@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Added `updatecheck` for listing and interactively installing APT, pacman, and AUR OS package updates.
+- Added `internetcheck` for external-IP, latency, configured DNS, DNS-query, and bounded Cloudflare throughput diagnostics.
+- Added `lcsversion` plus installed-version state under `/usr/local/share/linux-cli-setup/VERSION`.
+- Added `bind`/`bind9-dnsutils`, `fping`, and `iproute2` to required core packages for baseline network diagnostics.
+- Added remaining-space details for every distinct mounted local filesystem and currently mounted NFS filesystem to both MOTD display paths.
+- Added OS/version, cached package-update status, UFW status, and internet connectivity details to the built-in MOTD, with matching host-health details in the UniFetch view.
 - Added the standalone Debian/Ubuntu `arping` package to the netops profile; Arch already receives the `arping` command from its existing `iputils` package.
 - Added chrony, fail2ban, and logrotate to the core package set for baseline NTP, SSH protection, and log maintenance.
 - Added managed chrony configuration with DHCP NTP sources and `us.pool.ntp.org` fallback.
@@ -20,15 +26,20 @@ All notable changes to this project will be documented in this file.
 - Added a managed UniFetch MOTD configuration with OS-matched ASCII art, local IP, public IP, package, CPU, GPU, memory, disk, user, and locale details.
 - Added optional Arch/Garuda `unifetch` package coverage through the existing pacman/yay package path.
 - Added a `timecheck` utility with an `ntpcheck` alias for chrony/NTP status, selected time source, and stratum details.
-- Added transaction signal handling so interrupted install, refresh, and uninstall runs roll back before exiting.
-- Added a transaction exit backstop so unexpected nonzero install, refresh, and uninstall exits roll back active changes while skipping over rollback-command failures.
+- Added transaction signal handling so interrupted install, update, and uninstall runs roll back before exiting.
+- Added a transaction exit backstop so unexpected nonzero install, update, and uninstall exits roll back active changes while skipping over rollback-command failures.
 
 ### Changed
 
+- Split install and update behavior: `install.sh` now rejects existing installs, while `update.sh` requires saved install state and updates every saved profile.
+- Changed `update.sh` to preserve existing configuration files byte-for-byte, add missing structured configuration files, append only safely parsed missing auto-update settings, preserve firewall/timezone/shell/Git/Tide choices, and avoid package autoremove or orphan removal.
+- Changed install, update, and uninstall startup output to show the running version; update also shows installed and target versions.
+- Changed MOTD network, storage, package, firewall, and service probes to use local data or short timeouts so unavailable resources do not significantly delay login.
+- Changed preserved legacy UniFetch MOTD configurations to receive newer status fields from the managed MOTD executable without rewriting the configuration file.
 - Changed the initial GitHub release lookup to time out after 10 seconds without a response, warn, and continue with the installed version.
-- Changed install, refresh, and uninstall completion handling to print the exact persistent log path on successful, failed, and interrupted exits.
+- Changed install, update, and uninstall completion handling to print the exact persistent log path on successful, failed, and interrupted exits.
 - Changed package action output to show the owning profile as `profile/package` and switched action lines away from dark blue to a brighter console color.
-- Changed time synchronization from systemd-timesyncd to chrony and disabled the previous timesyncd service during install or refresh.
+- Changed time synchronization from systemd-timesyncd to chrony and disabled the previous timesyncd service during fresh install.
 - Changed the package group source from tab-delimited `data/package-groups.tsv` to editable `data/package-groups.yaml`.
 - Changed the installed auto-update command to `/usr/local/bin/auto-update` and the runtime config to `/etc/auto-update.conf`, with cleanup for the previous managed paths.
 - Changed the Docker status utility name from `docker-status` to `dockercheck`.
@@ -41,7 +52,7 @@ All notable changes to this project will be documented in this file.
 - Changed package mappings so Arch rows use pacman packages and Debian rows use Debian stable package names, except Docker's official apt repository package path.
 - Restored automatic yay bootstrap and AUR fallback installs for optional Arch packages so the Arch install can be more complete.
 - Restored Arch `aide` and `hadolint` as yay/AUR-backed optional package entries.
-- Clarified `update.sh --help` now that updates are handled through the installer refresh path.
+- Clarified `update.sh --help` for the non-destructive saved-profile update path.
 - Corrected the agent validation commands so Bash and Fish syntax checks cover every listed file.
 - Changed Fish plugin setup to install the managed Fisher plugin list in one pass, verify Tide helper functions, and only then reapply the managed prompt.
 - Changed interactive installs to ask for MOTD behavior when no MOTD option, environment override, or saved mode exists, while noninteractive installs keep the previous replace behavior.

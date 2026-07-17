@@ -9,17 +9,84 @@ set -euo pipefail
 
 UNIFETCH_CONFIG="/usr/local/share/linux-cli-setup/unifetch-motd.conf"
 PUBLIC_IP_URL="https://api.ipify.org"
-PUBLIC_IP_TIMEOUT=2
+PUBLIC_IP_TIMEOUT=1
+MOTD_COMMAND_TIMEOUT=2
+MOTD_STORAGE_TIMEOUT=1
+UNIFETCH_TIMEOUT=4
+
+mounted_storage_paths() {
+    local device_id filesystem_type local_source mountpoint raw_mountpoint source storage_key
+    local -A seen_storage=()
+
+    command -v findmnt >/dev/null 2>&1 || {
+        printf '/\n'
+        return
+    }
+
+    while IFS= read -r raw_mountpoint; do
+        printf -v mountpoint '%b' "$raw_mountpoint"
+        [[ -n "$mountpoint" ]] || continue
+
+        filesystem_type=""
+        device_id=""
+        source=""
+        read -r filesystem_type device_id source < <(
+            findmnt -n -o FSTYPE,MAJ:MIN,SOURCE --target "$mountpoint" 2>/dev/null || true
+        ) || continue
+
+        if [[ "$mountpoint" == "/" ]]; then
+            storage_key="root"
+            if [[ "$source" == /dev/* ]]; then
+                local_source="${source%%\[*}"
+                seen_storage["local:${local_source:-${device_id:-$source}}"]="1"
+            fi
+        elif [[ "$filesystem_type" == "nfs" || "$filesystem_type" == "nfs4" ]]; then
+            storage_key="nfs:${source}:${mountpoint}"
+        elif [[ "$source" == /dev/* ]]; then
+            local_source="${source%%\[*}"
+            storage_key="local:${local_source:-${device_id:-$source}}"
+        elif [[ "$filesystem_type" == "zfs" ]]; then
+            storage_key="local-zfs:$source"
+        else
+            continue
+        fi
+
+        [[ -z "${seen_storage[$storage_key]:-}" ]] || continue
+        seen_storage[$storage_key]=1
+        printf '%s\n' "$mountpoint"
+    done < <(findmnt -ln -o TARGET | LC_ALL=C sort)
+
+    return 0
+}
 
 run_unifetch_motd() {
+    local output storage_paths
+
     command -v unifetch >/dev/null 2>&1 || return 1
     [[ -r "$UNIFETCH_CONFIG" ]] || return 1
 
-    unifetch \
-        --config "$UNIFETCH_CONFIG" \
-        --ascii_distro auto \
-        --ip_host "$PUBLIC_IP_URL" \
-        --ip_timeout "$PUBLIC_IP_TIMEOUT"
+    storage_paths="$(mounted_storage_paths)"
+    export LINUX_CLI_MOTD_STORAGE_PATHS="${storage_paths:-/}"
+
+    if ! output="$(
+        timeout "$UNIFETCH_TIMEOUT" unifetch \
+            --config "$UNIFETCH_CONFIG" \
+            --ascii_distro auto \
+            --ip_host "$PUBLIC_IP_URL" \
+            --ip_timeout "$PUBLIC_IP_TIMEOUT" 2>/dev/null
+    )"; then
+        return 1
+    fi
+
+    printf '%s\n' "$output"
+
+    # Older installations may have a locally customized UniFetch configuration.
+    # update.sh preserves that file byte-for-byte, so add the new status block
+    # from this managed executable when the preserved config lacks it.
+    if ! grep -Fq 'LINUX_CLI_MOTD_STORAGE_PATHS' "$UNIFETCH_CONFIG" || \
+        ! grep -Fq 'info "Updates" package_updates' "$UNIFETCH_CONFIG"; then
+        extended_status_block
+    fi
 }
 
 separator() {
@@ -43,8 +110,108 @@ memory_summary() {
     printf '%s / %s' "$(format_bytes_gib "$used")" "$(format_bytes_gib "$total")"
 }
 
-root_disk_summary() {
-    df -h / | awk 'NR == 2 { printf "%s used of %s (%s)", $3, $2, $5 }'
+os_summary() {
+    local pretty_name
+
+    pretty_name="$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | head -n 1)"
+    pretty_name="${pretty_name#\"}"
+    pretty_name="${pretty_name%\"}"
+    printf '%s' "${pretty_name:-Linux}"
+}
+
+storage_summary() {
+    local -a storage_paths=()
+    local disk_output mountpoint percent remaining total used
+
+    mapfile -t storage_paths < <(mounted_storage_paths)
+    ((${#storage_paths[@]} > 0)) || storage_paths=(/)
+
+    disk_output="$(
+        timeout "$MOTD_STORAGE_TIMEOUT" \
+            df -h --output=size,used,avail,pcent,target "${storage_paths[@]}" 2>/dev/null || true
+    )"
+
+    while read -r total used remaining percent mountpoint; do
+        [[ "$total" == "Size" || -z "$mountpoint" ]] && continue
+        printf '  %-22s %s used of %s (%s), %s free\n' \
+            "Disk ($mountpoint):" "$used" "$total" "$percent" "$remaining"
+    done <<< "$disk_output"
+}
+
+package_update_summary() {
+    local count output status=0
+
+    if command -v pacman >/dev/null 2>&1; then
+        output="$(timeout "$MOTD_COMMAND_TIMEOUT" pacman -Qu 2>/dev/null)" || status=$?
+        [[ "$status" -eq 1 && -z "$output" ]] && status=0
+    elif command -v apt-get >/dev/null 2>&1; then
+        output="$(
+            timeout "$MOTD_COMMAND_TIMEOUT" \
+                apt-get --simulate -o Debug::NoLocking=1 upgrade 2>/dev/null
+        )" || status=$?
+        if [[ "$status" -eq 0 ]]; then
+            output="$(grep '^Inst ' <<< "$output" || true)"
+        fi
+    else
+        printf 'unavailable'
+        return
+    fi
+
+    if [[ "$status" -eq 124 ]]; then
+        printf 'check timed out'
+        return
+    elif [[ "$status" -ne 0 ]]; then
+        printf 'check unavailable'
+        return
+    fi
+
+    count="$(grep -cve '^[[:space:]]*$' <<< "$output" || true)"
+    if [[ "$count" -eq 0 ]]; then
+        printf 'none known (cached metadata)'
+    else
+        printf '%s available (cached metadata)' "$count"
+    fi
+}
+
+firewall_summary() {
+    local enabled status
+
+    if [[ -r /etc/ufw/ufw.conf ]]; then
+        enabled="$(awk -F= '/^ENABLED=/ { print tolower($2); exit }' /etc/ufw/ufw.conf)"
+        [[ "$enabled" == "yes" ]] && printf 'enabled' || printf 'disabled'
+        return
+    fi
+
+    if [[ "$EUID" -eq 0 ]] && command -v ufw >/dev/null 2>&1; then
+        status="$(timeout 1 ufw status 2>/dev/null | awk 'NR == 1 { print tolower($2) }')"
+        printf '%s' "${status:-unavailable}"
+        return
+    fi
+
+    printf 'unavailable'
+}
+
+extended_status_block() {
+    local public_ip
+
+    printf '\n'
+    separator
+    printf '  linux-cli-setup status\n'
+    separator
+    printf '  %-13s %s\n' 'OS:' "$(os_summary)"
+    printf '  %-13s %s\n' 'Kernel:' "$(uname -r)"
+    storage_summary
+    public_ip="$(public_ip_summary)"
+    if [[ "$public_ip" == "unavailable" ]]; then
+        printf '  %-13s %s\n' 'Internet:' 'unavailable'
+    else
+        printf '  %-13s online (%s)\n' 'Internet:' "$public_ip"
+    fi
+    printf '  %-13s %s\n' 'Updates:' "$(package_update_summary)"
+    printf '  %-13s %s\n' 'Firewall:' "$(firewall_summary)"
+    printf '  %-13s %s\n' 'SSH:' "$(ssh_status)"
+    printf '  %-17s %s\n' 'Reboot Required:' "$(reboot_required)"
+    separator
 }
 
 ip_summary() {
@@ -97,7 +264,7 @@ service_status() {
     local current_status
 
     if command -v systemctl >/dev/null 2>&1; then
-        current_status="$(systemctl is-active "$unit" 2>/dev/null || true)"
+        current_status="$(timeout 1 systemctl is-active "$unit" 2>/dev/null || true)"
         printf '%s' "${current_status:-unknown}"
         return
     fi
@@ -125,14 +292,22 @@ separator
 printf '  %s\n' "$host_name"
 separator
 printf '  %-13s %s\n' 'Uptime:' "$(uptime -p | sed 's/^up //')"
+printf '  %-13s %s\n' 'OS:' "$(os_summary)"
 printf '  %-13s %s\n' 'Kernel:' "$(uname -r)"
 printf '  %-13s %s\n' 'Load Avg:' "$load_average"
 printf '  %-13s %s\n' 'Memory:' "$(memory_summary)"
-printf '  %-13s %s\n' 'Root Disk:' "$(root_disk_summary)"
+storage_summary
 printf '  %-13s %s\n' 'Local IP:' "$(ip_summary)"
-printf '  %-13s %s\n' 'Public IP:' "$(public_ip_summary)"
+public_ip="$(public_ip_summary)"
+if [[ "$public_ip" == "unavailable" ]]; then
+    printf '  %-13s %s\n' 'Internet:' 'unavailable'
+else
+    printf '  %-13s online (%s)\n' 'Internet:' "$public_ip"
+fi
 section_separator
 printf '  ssh: %s\n' "$(ssh_status)"
+printf '  ufw: %s\n' "$(firewall_summary)"
+printf '  updates: %s\n' "$(package_update_summary)"
 section_separator
 printf '  %-17s %s\n' 'Reboot Required:' "$(reboot_required)"
 separator

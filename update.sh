@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Compatibility entry point. The installer now refreshes an existing
-# linux-cli-setup installation when saved state is present.
+# Non-destructive update entry point for an existing linux-cli-setup install.
 
 set -euo pipefail
 
@@ -11,13 +10,13 @@ show_help() {
     cat <<'USAGE'
 Usage: sudo ./update.sh [options]
 
-Compatibility entry point. This runs install.sh, which refreshes an existing
-linux-cli-setup installation when saved state is present.
+Update an existing linux-cli-setup installation while preserving existing
+configuration files. Run install.sh first on systems without saved install state.
 
 Options:
-  --profile NAME[,NAME]   Refresh one or more groups in addition to core.
+  --profile NAME[,NAME]   Add one or more groups while updating saved groups.
   --profiles NAME[,NAME]  Alias for --profile.
-  --all-profiles          Refresh every supported group.
+  --all-profiles          Update every supported group.
   --skip-performance      Skip the default performance tuning section.
   --skip-hardening        Skip the default hardening section.
   --motd MODE             MOTD behavior: keep, replace, or combine.
@@ -27,9 +26,9 @@ Options:
   --version               Show version.
   --help                  Show this help.
 
-If no group option is provided and saved install state exists, install.sh
-refreshes the previously installed profiles. On a new system, install.sh
-installs core only unless more profiles are specified.
+If no group option is provided, update.sh updates the previously installed
+profiles. Existing configuration files are preserved and missing configuration
+files are installed.
 USAGE
 }
 
@@ -40,5 +39,6 @@ for argument in "$@"; do
     fi
 done
 
-export LINUX_CLI_ENTRYPOINT="$SCRIPT_DIR/install.sh"
-exec "$SCRIPT_DIR/install.sh" "$@"
+export LINUX_CLI_OPERATION=update
+export LINUX_CLI_ENTRYPOINT="$SCRIPT_DIR/update.sh"
+exec "$SCRIPT_DIR/scripts/setup-linux-cli.sh" "$@"

@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+#
+# Interactively list and install Debian/Ubuntu or Arch OS package updates.
+
+set -euo pipefail
+
+VERSION="0.5b"
+COMMAND_NAME="$(basename "$0")"
+
+show_help() {
+    cat <<HELP
+Usage: $COMMAND_NAME [--version] [--help]
+
+Refresh package metadata, list available OS package updates, and ask before
+installing them. Debian/Ubuntu uses apt. Arch uses pacman and includes AUR
+updates through yay when yay is available.
+HELP
+}
+
+case "${1:-}" in
+    "")
+        ;;
+    --version)
+        printf '%s %s\n' "$COMMAND_NAME" "$VERSION"
+        exit 0
+        ;;
+    --help)
+        show_help
+        exit 0
+        ;;
+    *)
+        printf 'Unknown option: %s\n' "$1" >&2
+        exit 2
+        ;;
+esac
+
+if [[ "$#" -gt 1 ]]; then
+    printf 'Unexpected extra arguments.\n' >&2
+    exit 2
+fi
+
+run_as_root() {
+    if [[ "$EUID" -eq 0 ]]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo -- "$@"
+    else
+        printf 'Root privileges are required. Run this command with sudo.\n' >&2
+        return 1
+    fi
+}
+
+confirm_install() {
+    local answer
+
+    while true; do
+        printf 'Install these updates now? [y/N]: '
+        IFS= read -r answer || return 1
+        case "${answer,,}" in
+            y|yes)
+                return 0
+                ;;
+            ""|n|no)
+                return 1
+                ;;
+            *)
+                printf 'Please answer yes or no.\n'
+                ;;
+        esac
+    done
+}
+
+update_debian() {
+    local -a updates=()
+
+    printf 'Refreshing apt package metadata...\n'
+    run_as_root apt-get update
+    mapfile -t updates < <(apt list --upgradable 2>/dev/null | sed '1d' | sed '/^[[:space:]]*$/d')
+
+    if [[ "${#updates[@]}" -eq 0 ]]; then
+        printf 'No Debian/Ubuntu package updates are available.\n'
+        return 0
+    fi
+
+    printf '\nAvailable Debian/Ubuntu updates (%s):\n' "${#updates[@]}"
+    printf '  %s\n' "${updates[@]}"
+    printf '\n'
+
+    if ! confirm_install; then
+        printf 'Update installation cancelled.\n'
+        return 0
+    fi
+
+    export DEBIAN_FRONTEND=noninteractive
+    run_as_root apt-get -y \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        upgrade
+    printf 'Debian/Ubuntu package updates completed.\n'
+}
+
+list_arch_repository_updates() {
+    if command -v checkupdates >/dev/null 2>&1; then
+        checkupdates 2>/dev/null || true
+    else
+        printf 'checkupdates is unavailable; using currently cached pacman metadata.\n' >&2
+        pacman -Qu 2>/dev/null || true
+    fi
+}
+
+run_yay_as_user() {
+    if [[ "$EUID" -ne 0 ]]; then
+        yay "$@"
+    elif [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+        runuser -u "$SUDO_USER" -- yay "$@"
+    else
+        printf 'AUR updates require a non-root user. Run updatecheck through sudo from that user.\n' >&2
+        return 1
+    fi
+}
+
+update_arch() {
+    local -a aur_updates=()
+    local -a repository_updates=()
+
+    printf 'Checking Arch repository updates...\n'
+    mapfile -t repository_updates < <(list_arch_repository_updates | sed '/^[[:space:]]*$/d')
+    if command -v yay >/dev/null 2>&1; then
+        printf 'Checking AUR updates...\n'
+        mapfile -t aur_updates < <(run_yay_as_user -Qua 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+    fi
+
+    if [[ "${#repository_updates[@]}" -eq 0 && "${#aur_updates[@]}" -eq 0 ]]; then
+        printf 'No Arch or AUR package updates are available.\n'
+        return 0
+    fi
+
+    if [[ "${#repository_updates[@]}" -gt 0 ]]; then
+        printf '\nArch repository updates (%s):\n' "${#repository_updates[@]}"
+        printf '  %s\n' "${repository_updates[@]}"
+    fi
+    if [[ "${#aur_updates[@]}" -gt 0 ]]; then
+        printf '\nAUR updates (%s):\n' "${#aur_updates[@]}"
+        printf '  %s\n' "${aur_updates[@]}"
+    fi
+    printf '\n'
+
+    if ! confirm_install; then
+        printf 'Update installation cancelled.\n'
+        return 0
+    fi
+
+    run_as_root pacman -Syu --noconfirm
+    if [[ "${#aur_updates[@]}" -gt 0 ]]; then
+        run_yay_as_user -Sua --noconfirm
+    fi
+    printf 'Arch package updates completed.\n'
+}
+
+if command -v apt-get >/dev/null 2>&1; then
+    update_debian
+elif command -v pacman >/dev/null 2>&1; then
+    update_arch
+else
+    printf 'Unsupported system: apt-get or pacman is required.\n' >&2
+    exit 1
+fi

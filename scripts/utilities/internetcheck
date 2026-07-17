@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+#
+# Run bounded Internet, DNS, latency, and Cloudflare throughput diagnostics.
+
+set -euo pipefail
+
+VERSION="0.5b"
+COMMAND_NAME="$(basename "$0")"
+PUBLIC_IP_URL="https://api.ipify.org"
+CLOUDFLARE_DOWNLOAD_URL="https://speed.cloudflare.com/__down?bytes=5000000"
+CLOUDFLARE_UPLOAD_URL="https://speed.cloudflare.com/__up"
+SPEED_TEST_TIMEOUT=10
+SKIP_SPEED=0
+
+show_help() {
+    cat <<HELP
+Usage: $COMMAND_NAME [--skip-speed] [--version] [--help]
+
+Check Internet connectivity, external IP, Cloudflare latency, configured DNS
+server reachability and query latency, and bounded Cloudflare download/upload
+throughput. The speed test transfers approximately 5 MB down and 1 MB up.
+
+Options:
+  --skip-speed  Skip the download and upload throughput test.
+  --version     Show version.
+  --help        Show this help.
+HELP
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-speed)
+            SKIP_SPEED=1
+            ;;
+        --version)
+            printf '%s %s\n' "$COMMAND_NAME" "$VERSION"
+            exit 0
+            ;;
+        --help)
+            show_help
+            exit 0
+            ;;
+        *)
+            printf 'Unknown option: %s\n' "$1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+for required_command in awk curl dig fping grep head sed sort; do
+    if ! command -v "$required_command" >/dev/null 2>&1; then
+        printf 'Missing required command: %s\n' "$required_command" >&2
+        exit 1
+    fi
+done
+
+print_heading() {
+    printf '\n%s\n' "$1"
+    printf '%s\n' '------------------------------------------------------------'
+}
+
+fping_average_latency() {
+    local host="$1"
+    local output
+
+    output="$(fping -c 3 -q "$host" 2>&1 || true)"
+    awk -F'min/avg/max = ' '
+        NF == 2 {
+            split($2, values, "/")
+            if (values[2] != "") {
+                print values[2] " ms"
+                found = 1
+            }
+        }
+        END { if (!found) print "unavailable" }
+    ' <<< "$output"
+}
+
+collect_dns_servers() {
+    {
+        awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf 2>/dev/null || true
+        if command -v resolvectl >/dev/null 2>&1; then
+            resolvectl dns 2>/dev/null |
+                awk -F': ' 'NF == 2 { count = split($2, values, " "); for (i = 1; i <= count; i++) print values[i] }'
+        fi
+    } | awk '/^[0-9A-Fa-f:.]+$/ && !seen[$0]++' | sort -V
+}
+
+check_dns_server() {
+    local dns_server="$1"
+    local dns_output query_latency status
+
+    dns_output="$(dig "@$dns_server" example.com A +tries=1 +time=2 +stats 2>/dev/null || true)"
+    status="$(sed -n 's/.*status: \([^,]*\),.*/\1/p' <<< "$dns_output" | head -n 1)"
+    query_latency="$(awk '/^;; Query time:/ { print $4 " ms"; exit }' <<< "$dns_output")"
+
+    printf 'DNS server: %s\n' "$dns_server"
+    printf '  ICMP latency: %s\n' "$(fping_average_latency "$dns_server")"
+    if [[ "$status" == "NOERROR" ]]; then
+        printf '  DNS query: working (%s)\n' "${query_latency:-latency unavailable}"
+    else
+        printf '  DNS query: failed (%s)\n' "${status:-no response}"
+    fi
+}
+
+bytes_per_second_to_mbps() {
+    awk -v bytes_per_second="$1" '
+        BEGIN {
+            if (bytes_per_second !~ /^[0-9]+([.][0-9]+)?$/ || bytes_per_second <= 0) {
+                print "unavailable"
+            } else {
+                printf "%.2f Mbps", (bytes_per_second * 8) / 1000000
+            }
+        }
+    '
+}
+
+run_speed_test() {
+    local download_speed upload_speed
+
+    download_speed="$(
+        curl -fsS --connect-timeout 3 --max-time "$SPEED_TEST_TIMEOUT" \
+            -o /dev/null -w '%{speed_download}' "$CLOUDFLARE_DOWNLOAD_URL" 2>/dev/null || true
+    )"
+    upload_speed="$(
+        head -c 1000000 /dev/zero |
+            curl -fsS --connect-timeout 3 --max-time "$SPEED_TEST_TIMEOUT" \
+                -o /dev/null -w '%{speed_upload}' --data-binary @- "$CLOUDFLARE_UPLOAD_URL" 2>/dev/null || true
+    )"
+
+    printf 'Download: %s\n' "$(bytes_per_second_to_mbps "${download_speed:-0}")"
+    printf 'Upload:   %s\n' "$(bytes_per_second_to_mbps "${upload_speed:-0}")"
+}
+
+print_heading 'Internet Connectivity'
+external_ip="$(curl -fsS --connect-timeout 2 --max-time 4 "$PUBLIC_IP_URL" 2>/dev/null || true)"
+if [[ "$external_ip" =~ ^[0-9A-Fa-f:.]+$ ]]; then
+    printf 'Status:      online\n'
+    printf 'External IP: %s\n' "$external_ip"
+else
+    printf 'Status:      unavailable\n'
+    printf 'External IP: unavailable\n'
+fi
+printf 'Latency:     %s (Cloudflare 1.1.1.1)\n' "$(fping_average_latency 1.1.1.1)"
+
+print_heading 'Configured DNS Servers'
+mapfile -t dns_servers < <(collect_dns_servers)
+if [[ "${#dns_servers[@]}" -eq 0 ]]; then
+    printf 'No configured DNS servers were detected.\n'
+else
+    for dns_server in "${dns_servers[@]}"; do
+        check_dns_server "$dns_server"
+    done
+fi
+
+if [[ "$SKIP_SPEED" -eq 0 ]]; then
+    print_heading 'Quick Cloudflare Speed Test'
+    run_speed_test
+fi

@@ -115,6 +115,7 @@ remove_installed_utility_scripts() {
         script_name="$(basename "$script_file")"
         [[ -n "$script_name" ]] || continue
         [[ "${script_name:0:1}" != "." ]] || continue
+        [[ "$script_name" != "lcsversion" ]] || continue
         remove_file_if_managed_or_backup "/usr/local/bin/$script_name" "$script_file"
     done < <(find "$UTILITY_SCRIPT_DIR" -maxdepth 1 -type f -print0 | sort -z)
 
@@ -201,6 +202,10 @@ remove_managed_files() {
     remove_file_if_managed_or_backup /etc/dhcp/dhclient-exit-hooks.d/linux-cli-chrony "$CHRONY_TEMPLATE_DIR/dhclient-exit-hook"
     remove_file_if_managed_or_backup /etc/fail2ban/jail.d/linux-cli-setup.conf "$FAIL2BAN_TEMPLATE_DIR/jail.d/linux-cli-setup.conf"
     remove_file_if_managed_or_backup /etc/logrotate.d/linux-cli-setup "$LOGROTATE_TEMPLATE_DIR/linux-cli-setup"
+    remove_file_if_managed_or_backup "$INSTALLED_VERSION_FILE" "$VERSION_FILE"
+    if [[ -d "$(dirname "$INSTALLED_VERSION_FILE")" ]] && [[ -z "$(find "$(dirname "$INSTALLED_VERSION_FILE")" -mindepth 1 -print -quit)" ]]; then
+        run_step_optional "Removing directory" "$(dirname "$INSTALLED_VERSION_FILE")" rmdir "$(dirname "$INSTALLED_VERSION_FILE")"
+    fi
 
     if systemd_available; then
         run_step_optional "Reloading" "systemd manager configuration" systemctl daemon-reload
@@ -281,6 +286,12 @@ main() {
     require_root
     init_logging uninstall
     init_package_family
+    log "Running uninstall.sh with linux-cli-setup version $(project_version)."
+    if install_state_exists; then
+        log "Installed linux-cli-setup version: $(installed_project_version)"
+    else
+        log "Installed linux-cli-setup version: not installed"
+    fi
     self_update_if_newer "${LINUX_CLI_ENTRYPOINT:-$0}" "$@"
     start_transaction
     register_transaction_traps
