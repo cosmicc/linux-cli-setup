@@ -65,6 +65,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Fixed Fisher updates failing on Ubuntu Fish versions that reject the compact one-line `else exit` syntax.
 - Fixed `install_test.sh` logging fallback when `/var/log/linux-cli-setup` exists but is not writable by the current user.
 - Fixed non-interactive Tide prompt configuration returning exit code `1` when Tide OS detection is unavailable even though the fallback OS icon was written.
 - Fixed login-time Fish errors when the managed Tide prompt is installed but Tide helper functions are missing, by falling back to a basic prompt instead of calling unavailable `_tide_*` commands.

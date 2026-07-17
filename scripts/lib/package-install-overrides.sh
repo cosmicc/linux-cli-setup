@@ -336,7 +336,7 @@ update_fisher_plugins() {
     fi
 
     log "Updating Fisher plugins for $TARGET_USER"
-    if run_step "Updating" "registered Fisher plugins" run_as_target fish -lc "if functions -q fisher; fisher update; else exit 0; end"; then
+    if run_step "Updating" "registered Fisher plugins" run_as_target fish -lc "functions -q fisher; or exit 0; fisher update"; then
         update_rc=0
     else
         update_rc=$?
