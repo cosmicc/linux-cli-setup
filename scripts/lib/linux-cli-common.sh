@@ -368,7 +368,7 @@ project_version() {
         return
     fi
 
-    printf '0.5b'
+    printf '0.6b'
 }
 
 print_version() {

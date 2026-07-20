@@ -9,7 +9,7 @@ CONFIG_FILE="/etc/auto-update.conf"
 LOG_DIR="/var/log/linux-cli-setup"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 LOG_FILE="$LOG_DIR/auto-update-${TIMESTAMP}.log"
-VERSION="0.5b"
+VERSION="0.6b"
 DEBUG=0
 CURRENT_STEP_OUTPUT=""
 

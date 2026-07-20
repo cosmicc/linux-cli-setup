@@ -15,7 +15,7 @@ INSTALL_MARKER_PATHS=(
     "/etc/sysctl.d/99-linux-cli-setup-hardening.conf"
     "/etc/sysctl.d/99-linux-cli-setup-performance.conf"
 )
-SCRIPT_VERSION="0.5b"
+SCRIPT_VERSION="0.6b"
 
 show_help() {
     cat <<'HELP'

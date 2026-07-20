@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+#
+# Replace other login MOTD entries with the managed linux-cli-setup MOTD and
+# persist replace mode for future linux-cli-setup updates.
+
+set -Eeuo pipefail
+
+VERSION="0.6b"
+STATE_DIR="/var/lib/linux-cli-setup"
+STATE_FILE="$STATE_DIR/install.env"
+MOTD_COMMAND="/usr/local/bin/linux-cli-motd"
+UPDATE_MOTD_DIR="/etc/update-motd.d"
+UPDATE_MOTD_SNIPPET="$UPDATE_MOTD_DIR/99-linux-cli-setup"
+DISABLED_MOTD_DIR="$UPDATE_MOTD_DIR/.linux-cli-setup-disabled"
+FISH_MOTD_HOOK="/etc/fish/conf.d/linux-cli-motd.fish"
+CONFIG_DIR="/etc/linux-cli-setup"
+STATIC_MOTD="/etc/motd"
+STATIC_MOTD_BACKUP="$CONFIG_DIR/motd.static.original"
+TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+
+STATE_TEMP_FILE=""
+DISABLED_STATE_FILE=""
+UPDATE_SNIPPET_BACKUP=""
+UPDATE_SNIPPET_CREATED=0
+FISH_HOOK_BACKUP=""
+FISH_HOOK_CREATED=0
+STATIC_MOTD_TRANSACTION_BACKUP=""
+STATIC_MOTD_BACKUP_CREATED=0
+CHANGES_COMMITTED=0
+declare -a DISABLED_SNIPPETS=()
+declare -a DISABLED_SNIPPET_MODES=()
+
+show_help() {
+    cat <<'HELP'
+Usage: sudo motdreplace [--version] [--help]
+
+Replace other login MOTD entries with the linux-cli-setup MOTD and save
+motd_mode=replace in the managed install state for future updates.
+
+Existing executable update-motd snippets are disabled and recorded so
+linux-cli-setup uninstall or another MOTD mode can restore them. A regular
+/etc/motd file is backed up before it is hidden.
+HELP
+}
+
+fail() {
+    printf 'motdreplace: %s\n' "$*" >&2
+    exit 1
+}
+
+require_secure_install_state() {
+    local state_directory_mode state_directory_owner state_file_mode state_file_owner
+
+    [[ -d "$STATE_DIR" && ! -L "$STATE_DIR" ]] ||
+        fail "Managed install state is missing. Run linux-cli-setup update before using this command."
+    [[ -f "$STATE_FILE" && ! -L "$STATE_FILE" ]] ||
+        fail "Managed install state is missing. Run linux-cli-setup update before using this command."
+
+    state_directory_owner="$(stat -c %u "$STATE_DIR")"
+    state_directory_mode="$(stat -c %a "$STATE_DIR")"
+    state_file_owner="$(stat -c %u "$STATE_FILE")"
+    state_file_mode="$(stat -c %a "$STATE_FILE")"
+    [[ "$state_directory_owner" == "0" && "$state_file_owner" == "0" ]] ||
+        fail "Managed install state must be owned by root."
+    if (((8#$state_directory_mode & 0022) != 0)); then
+        fail "Managed install state directory must not be group- or world-writable."
+    fi
+    if (((8#$state_file_mode & 0022) != 0)); then
+        fail "Managed install state file must not be group- or world-writable."
+    fi
+}
+
+validate_static_motd_target() {
+    [[ -e "$STATIC_MOTD" || -L "$STATIC_MOTD" ]] || return 0
+    [[ ! -L "$STATIC_MOTD" ]] || fail "Refusing to replace symbolic link $STATIC_MOTD."
+    [[ -f "$STATIC_MOTD" ]] || fail "Refusing to replace non-regular file $STATIC_MOTD."
+}
+
+require_secure_motd_command() {
+    local command_mode command_owner
+
+    [[ -f "$MOTD_COMMAND" && -x "$MOTD_COMMAND" && ! -L "$MOTD_COMMAND" ]] ||
+        fail "Managed MOTD command is missing. Run linux-cli-setup update before using this command."
+    command_owner="$(stat -c %u "$MOTD_COMMAND")"
+    command_mode="$(stat -c %a "$MOTD_COMMAND")"
+    [[ "$command_owner" == "0" ]] || fail "Managed MOTD command must be owned by root."
+    if (((8#$command_mode & 0022) != 0)); then
+        fail "Managed MOTD command must not be group- or world-writable."
+    fi
+}
+
+backup_replaced_file() {
+    local destination="$1"
+    local source="$2"
+    local backup_variable="$3"
+    local created_variable="$4"
+    local backup=""
+
+    if [[ -e "$destination" || -L "$destination" ]]; then
+        if cmp -s "$source" "$destination"; then
+            return 0
+        fi
+        backup="${destination}.linux-cli-setup.${TIMESTAMP}.bak"
+        cp -a -- "$destination" "$backup"
+        printf -v "$backup_variable" '%s' "$backup"
+        if [[ -L "$destination" ]]; then
+            rm -f -- "$destination"
+        fi
+    else
+        printf -v "$created_variable" '%s' 1
+    fi
+}
+
+install_update_motd_snippet() {
+    local disabled_state_file motd_file motd_mode
+
+    install -d -o root -g root -m 0755 "$UPDATE_MOTD_DIR" "$DISABLED_MOTD_DIR"
+    backup_replaced_file "$UPDATE_MOTD_SNIPPET" "$MOTD_COMMAND" \
+        UPDATE_SNIPPET_BACKUP UPDATE_SNIPPET_CREATED
+    install -o root -g root -m 0755 "$MOTD_COMMAND" "$UPDATE_MOTD_SNIPPET"
+
+    disabled_state_file="$DISABLED_MOTD_DIR/disabled-${TIMESTAMP}.txt"
+    DISABLED_STATE_FILE="$disabled_state_file"
+    while IFS= read -r -d '' motd_file; do
+        [[ "$motd_file" == "$UPDATE_MOTD_SNIPPET" ]] && continue
+        motd_mode="$(stat -c %a "$motd_file")"
+        DISABLED_SNIPPETS+=("$motd_file")
+        DISABLED_SNIPPET_MODES+=("$motd_mode")
+        chmod a-x "$motd_file"
+        printf '%s\n' "$motd_file" >> "$disabled_state_file"
+    done < <(find "$UPDATE_MOTD_DIR" -maxdepth 1 -type f -perm /111 -print0)
+
+    if [[ ! -s "$disabled_state_file" ]]; then
+        rm -f "$disabled_state_file"
+        DISABLED_STATE_FILE=""
+    fi
+}
+
+install_fish_motd_hook() {
+    local temporary_hook
+
+    install -d -o root -g root -m 0755 "$(dirname "$FISH_MOTD_HOOK")"
+    temporary_hook="$(mktemp)"
+    cat > "$temporary_hook" <<'FISH'
+# Show the dynamic MOTD on Fish login shells when update-motd is unavailable.
+if status is-login
+    and status is-interactive
+    if command -q linux-cli-motd
+        linux-cli-motd
+    end
+end
+FISH
+    backup_replaced_file "$FISH_MOTD_HOOK" "$temporary_hook" \
+        FISH_HOOK_BACKUP FISH_HOOK_CREATED
+    install -o root -g root -m 0644 "$temporary_hook" "$FISH_MOTD_HOOK"
+    rm -f "$temporary_hook"
+}
+
+suppress_static_motd() {
+    local empty_file
+
+    [[ -e "$STATIC_MOTD" ]] || return 0
+    [[ -s "$STATIC_MOTD" ]] || return 0
+
+    install -d -o root -g root -m 0700 "$CONFIG_DIR"
+    if [[ ! -f "$STATIC_MOTD_BACKUP" ]]; then
+        cp -p -- "$STATIC_MOTD" "$STATIC_MOTD_BACKUP"
+        chown root:root "$STATIC_MOTD_BACKUP"
+        chmod 0600 "$STATIC_MOTD_BACKUP"
+        STATIC_MOTD_BACKUP_CREATED=1
+    fi
+
+    STATIC_MOTD_TRANSACTION_BACKUP="$(mktemp)"
+    cp -p -- "$STATIC_MOTD" "$STATIC_MOTD_TRANSACTION_BACKUP"
+    empty_file="$(mktemp)"
+    install -o root -g root -m 0644 "$empty_file" "$STATIC_MOTD"
+    rm -f "$empty_file"
+}
+
+persist_replace_mode() {
+    STATE_TEMP_FILE="$(mktemp "$STATE_DIR/install.env.tmp.XXXXXX")"
+    awk -F= '
+        $1 == "motd_mode" {
+            if (!updated) {
+                print "motd_mode=replace"
+                updated = 1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!updated) {
+                print "motd_mode=replace"
+            }
+        }
+    ' "$STATE_FILE" > "$STATE_TEMP_FILE"
+    chown root:root "$STATE_TEMP_FILE"
+    chmod 0644 "$STATE_TEMP_FILE"
+    mv -f -- "$STATE_TEMP_FILE" "$STATE_FILE"
+    STATE_TEMP_FILE=""
+}
+
+rollback_changes() {
+    local index
+
+    [[ "$CHANGES_COMMITTED" -eq 0 ]] || return 0
+    [[ -n "$STATE_TEMP_FILE" ]] && rm -f -- "$STATE_TEMP_FILE"
+    [[ -n "$DISABLED_STATE_FILE" ]] && rm -f -- "$DISABLED_STATE_FILE"
+
+    for ((index = ${#DISABLED_SNIPPETS[@]} - 1; index >= 0; index--)); do
+        if [[ -e "${DISABLED_SNIPPETS[$index]}" ]]; then
+            chmod "${DISABLED_SNIPPET_MODES[$index]}" "${DISABLED_SNIPPETS[$index]}" || true
+        fi
+    done
+
+    if [[ -n "$STATIC_MOTD_TRANSACTION_BACKUP" && -f "$STATIC_MOTD_TRANSACTION_BACKUP" ]]; then
+        cp -p -- "$STATIC_MOTD_TRANSACTION_BACKUP" "$STATIC_MOTD" || true
+    fi
+    [[ -n "$STATIC_MOTD_TRANSACTION_BACKUP" ]] && rm -f -- "$STATIC_MOTD_TRANSACTION_BACKUP"
+    if [[ "$STATIC_MOTD_BACKUP_CREATED" -eq 1 ]]; then
+        rm -f -- "$STATIC_MOTD_BACKUP"
+    fi
+
+    if [[ -n "$UPDATE_SNIPPET_BACKUP" ]]; then
+        mv -f -- "$UPDATE_SNIPPET_BACKUP" "$UPDATE_MOTD_SNIPPET" || true
+    elif [[ "$UPDATE_SNIPPET_CREATED" -eq 1 ]]; then
+        rm -f -- "$UPDATE_MOTD_SNIPPET"
+    fi
+
+    if [[ -n "$FISH_HOOK_BACKUP" ]]; then
+        mv -f -- "$FISH_HOOK_BACKUP" "$FISH_MOTD_HOOK" || true
+    elif [[ "$FISH_HOOK_CREATED" -eq 1 ]]; then
+        rm -f -- "$FISH_MOTD_HOOK"
+    fi
+
+    return 0
+}
+
+cleanup_transaction_files() {
+    [[ -n "$STATIC_MOTD_TRANSACTION_BACKUP" ]] && rm -f -- "$STATIC_MOTD_TRANSACTION_BACKUP"
+    return 0
+}
+
+main() {
+    case "${1:-}" in
+        "")
+            ;;
+        --help)
+            show_help
+            return 0
+            ;;
+        --version)
+            printf 'motdreplace %s\n' "$VERSION"
+            return 0
+            ;;
+        *)
+            printf 'Unknown option: %s\n' "$1" >&2
+            printf 'Run motdreplace --help for usage.\n' >&2
+            return 2
+            ;;
+    esac
+
+    if [[ "$#" -gt 1 ]]; then
+        printf 'Unexpected extra arguments.\n' >&2
+        return 2
+    fi
+
+    [[ "$EUID" -eq 0 ]] || fail "Root privileges are required. Run sudo motdreplace."
+    require_secure_install_state
+    require_secure_motd_command
+    validate_static_motd_target
+
+    trap rollback_changes ERR
+    trap 'rollback_changes; exit 129' HUP
+    trap 'rollback_changes; exit 130' INT
+    trap 'rollback_changes; exit 143' TERM
+    if [[ -d "$UPDATE_MOTD_DIR" ]]; then
+        install_update_motd_snippet
+    else
+        install_fish_motd_hook
+    fi
+    suppress_static_motd
+    persist_replace_mode
+
+    CHANGES_COMMITTED=1
+    cleanup_transaction_files
+    trap - ERR HUP INT TERM
+    printf 'linux-cli-setup now replaces the login MOTD. Future updates will preserve replace mode.\n'
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

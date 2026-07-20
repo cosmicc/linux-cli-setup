@@ -375,11 +375,7 @@ suppress_static_motd() {
         return 0
     fi
 
-    [[ -f "$motd_path" ]] || return 0
-    if ! grep -Fq 'The programs included with the Debian GNU/Linux system are free software;' "$motd_path" && \
-        ! grep -Fq 'Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY' "$motd_path"; then
-        return 0
-    fi
+    [[ -f "$motd_path" && -s "$motd_path" ]] || return 0
 
     run_step "Creating directory" "$CONFIG_DIR" install -m 0700 -d "$CONFIG_DIR"
     if [[ ! -f "$STATIC_MOTD_BACKUP" ]]; then
@@ -388,27 +384,6 @@ suppress_static_motd() {
     fi
 
     tmp_file="$(mktemp)"
-    awk '
-        /^The programs included with the Debian GNU\/Linux system are free software;/ {
-            skip = 1
-            next
-        }
-        skip && /^permitted by applicable law\.$/ {
-            skip = 0
-            next
-        }
-        skip {
-            next
-        }
-        {
-            print
-        }
-    ' "$motd_path" > "$tmp_file"
-
-    if cmp -s "$motd_path" "$tmp_file"; then
-        rm -f "$tmp_file"
-        return 0
-    fi
 
     backup="${motd_path}.linux-cli-setup.${TIMESTAMP}.bak"
     run_step "Backing up" "$motd_path" cp -p "$motd_path" "$backup"
@@ -432,38 +407,14 @@ remove_linux_cli_motd_hooks() {
 }
 
 install_motd() {
-    if is_update_operation; then
-        case "${MOTD_MODE:-replace}" in
-            keep)
-                log "Preserving existing keep-mode MOTD configuration during update."
-                return 0
-                ;;
-            combine|replace)
-                log "Updating MOTD executables while preserving existing MOTD configuration."
-                install_unifetch_motd_config
-                install_owned_file "$MOTD_TEMPLATE" /usr/local/bin/linux-cli-motd 0755 root root
-                if [[ -d /etc/update-motd.d ]]; then
-                    install_owned_file "$MOTD_TEMPLATE" "$MOTD_UPDATE_SNIPPET" 0755 root root
-                else
-                    run_step "Creating directory" "/etc/fish/conf.d" install -m 0755 -d /etc/fish/conf.d
-                    install_config_file "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish" /etc/fish/conf.d/linux-cli-motd.fish 0644 root root
-                fi
-                return 0
-                ;;
-            *)
-                die "Unknown MOTD mode '${MOTD_MODE:-}'. Use keep, replace, or combine."
-                ;;
-        esac
-    fi
-
     case "${MOTD_MODE:-replace}" in
         keep)
             log "Keeping existing MOTD and removing linux-cli-setup login MOTD hooks."
+            install_unifetch_motd_config
+            install_owned_file "$MOTD_TEMPLATE" /usr/local/bin/linux-cli-motd 0755 root root
             reenable_motd_snippets
             restore_static_motd_if_managed
             remove_linux_cli_motd_hooks
-            remove_file_if_managed_or_backup /usr/local/bin/linux-cli-motd "$MOTD_TEMPLATE"
-            remove_unifetch_motd_config
             return
             ;;
         combine)

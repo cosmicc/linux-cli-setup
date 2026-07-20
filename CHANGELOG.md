@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6b - 07.19.2026
+
+### Added
+
+- Added process count, logged-in-user count, swap usage, memory-used percentage, available system temperature, and configured DNS servers to both MOTD display paths.
+- Added the root-only `motdreplace` command for replacing competing login MOTD entries and atomically saving replace mode for future updates.
+
+### Changed
+
+- Grouped MOTD details into separated system, resource, network, and service sections.
+- Changed keep mode to retain refreshed inactive MOTD assets so `motdreplace` can enable the managed MOTD without downloading files again.
+- Changed updates to reapply the saved MOTD mode so replace mode continues hiding newly added competing MOTD entries.
+- Changed replace mode to back up and hide a regular static `/etc/motd` in addition to disabling competing executable update-motd snippets.
+
+### Fixed
+
+- Fixed `/snap` mountpoints appearing as disks in the MOTD.
+
 ## 0.5b - 07.17.2026
 
 ### Added

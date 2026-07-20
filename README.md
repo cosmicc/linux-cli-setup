@@ -2,7 +2,7 @@
 
 Group-based setup scripts for Arch-based and Debian/Ubuntu-based Linux systems. A fresh install defaults to a safe `core` CLI baseline; heavier roles such as CLI comfort tools, development, network troubleshooting, wireless support, storage/filesystem tooling, Docker hosting, and desktop helpers are optional package groups.
 
-Current beta prerelease version: `0.5b`.
+Current beta prerelease version: `0.6b`.
 
 ## Supported Systems
 
@@ -300,12 +300,13 @@ updatecheck
 internetcheck
 lcsversion
 needs-reboot
+motdreplace
 aliases
 drivecheck
 dockercheck
 ```
 
-The `aliases` command prints the Fish abbreviations and aliases visible to the current user. `timecheck` shows chrony and NTP source details, and `ntpcheck` is installed as an alias to it. `updatecheck` refreshes and lists APT or pacman/AUR OS updates, asks for confirmation, and installs them only after approval. `internetcheck` checks external IP, Cloudflare latency, every detected DNS server, DNS query latency, and a bounded Cloudflare speed test using approximately 50 MB down and 20 MB up; use `internetcheck --skip-speed` to avoid the transfer. Cloudflare may collect speed-test measurement data for aggregate network insights. `needs-reboot` checks Debian/Ubuntu reboot markers and core system files updated since boot, returning exit status `1` when a reboot is recommended. `lcsversion` reads managed install state and remains available after uninstall so it can report that linux-cli-setup is not installed.
+The `aliases` command prints the Fish abbreviations and aliases visible to the current user. `timecheck` shows chrony and NTP source details, and `ntpcheck` is installed as an alias to it. `updatecheck` refreshes and lists APT or pacman/AUR OS updates, asks for confirmation, and installs them only after approval. `internetcheck` checks external IP, Cloudflare latency, every detected DNS server, DNS query latency, and a bounded Cloudflare speed test using approximately 50 MB down and 20 MB up; use `internetcheck --skip-speed` to avoid the transfer. Cloudflare may collect speed-test measurement data for aggregate network insights. `needs-reboot` checks Debian/Ubuntu reboot markers and core system files updated since boot, returning exit status `1` when a reboot is recommended. `motdreplace` is a root-only command that replaces other login MOTD entries with linux-cli-setup and saves replace mode for later updates. `lcsversion` reads managed install state and remains available after uninstall so it can report that linux-cli-setup is not installed.
 
 ## Automatic Updates
 
@@ -335,7 +336,9 @@ sudo ./install.sh --motd combine
 
 `replace` is the noninteractive default and hides existing MOTD entries so the linux-cli-setup dynamic status is shown by itself. `keep` leaves the existing MOTD alone and removes linux-cli-setup login MOTD hooks. `combine` shows the existing MOTD first, then the linux-cli-setup dynamic status block. If no MOTD option is provided in an interactive run and no saved MOTD mode exists, the installer asks which mode to use.
 
-For replace and combine modes, the installed MOTD command uses UniFetch with OS-matched ASCII art when `unifetch` is installed. Both the UniFetch and built-in views show the OS and kernel, memory, each distinct mounted local filesystem, currently mounted NFS filesystems, remaining storage, local IP, internet/public-IP status, load average, cached package-update status, UFW and SSH status, and whether a reboot may be required. Network and storage probes have short timeouts so an unavailable service or stale mount does not hold up login. Arch/Garuda installs try `unifetch` as an optional core package through pacman or yay/AUR. Debian/Ubuntu installs do not add a third-party UniFetch repository; they use UniFetch only when the command already exists.
+To switch an installed system to replace mode later, run `sudo motdreplace`. The command backs up a regular `/etc/motd`, disables competing executable update-motd snippets with restoration records, installs the linux-cli-setup login hook, and saves `motd_mode=replace` for future updates. Keep mode retains the inactive linux-cli-setup MOTD assets so this command remains available without needing another download.
+
+For replace and combine modes, the installed MOTD command uses UniFetch with OS-matched ASCII art when `unifetch` is installed. Both views group system, resource, network, and service details with separators. They show OS and kernel, uptime, load, available temperature, process and logged-in-user counts, memory usage with percentage, swap usage, mounted local and NFS storage except `/snap` mounts, local IP, configured DNS servers, internet/public-IP status, cached package-update status, UFW and SSH status, and whether a reboot may be required. Network and storage probes have short timeouts so an unavailable service or stale mount does not hold up login. Arch/Garuda installs try `unifetch` as an optional core package through pacman or yay/AUR. Debian/Ubuntu installs do not add a third-party UniFetch repository; they use UniFetch only when the command already exists.
 
 On systems with `/etc/update-motd.d`, the installer uses `99-linux-cli-setup` so combined MOTD output appears after existing distro entries. On systems without `/etc/update-motd.d`, replace and combine modes use a Fish login hook under `/etc/fish/conf.d/`. `LINUX_CLI_MOTD_MODE=keep|replace|combine` is also supported.
 
