@@ -40,7 +40,7 @@ sudo ./install.sh --all-profiles
 
 Package names are read from [data/package-groups.yaml](data/package-groups.yaml). Edit that file to change which Arch or Debian/Ubuntu packages belong to each group. The YAML file keeps package names as one-per-line lists so manual edits are easier to review than the old tab-delimited map.
 
-Package status lines show the owning profile for package actions, such as `core/curl` or `netops/nmap`. Use `--motd keep`, `--motd replace`, or `--motd combine` to choose login MOTD behavior. Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
+Package status lines show the owning profile for package actions, such as `core/curl` or `netops/nmap`. Use `--motd keep`, `--motd replace`, `--motd combine`, or `--motd fastfetch` to choose login MOTD behavior. Use `--debug` to show captured package-manager output in the console and log file. Use `--no-color` to disable colored console output.
 Performance tuning and hardening are enabled by default. Use `--skip-performance` or `--skip-hardening` when you need to leave those settings untouched for a specific host.
 
 Before install, update, or uninstall makes system changes, the script checks GitHub releases and prereleases for a newer `linux-cli-setup` version. The release lookup times out after 10 seconds without a response, warns, and continues with the running version. If a newer version exists, it fetches and pulls from `origin/main` with Git progress shown, then restarts the same command from a temporary wrapper in `/tmp`. Set `LINUX_CLI_SKIP_SELF_UPDATE=1` only for troubleshooting when you intentionally need to run the local checkout as-is. If an install, update, or uninstall fails, exits nonzero, or is interrupted with Ctrl+C or a termination signal, the active transaction rolls back before the script exits and skips over rollback errors so cleanup can continue.
@@ -326,21 +326,26 @@ On systemd hosts, the installer enables `linux-cli-auto-update.timer`. It runs d
 
 ## MOTD Behavior
 
-The installer supports three MOTD modes:
+The installer supports four MOTD modes:
 
 ```bash
 sudo ./install.sh --motd replace
 sudo ./install.sh --motd keep
 sudo ./install.sh --motd combine
+sudo ./install.sh --motd fastfetch
 ```
 
-`replace` is the noninteractive default and hides existing MOTD entries so the linux-cli-setup dynamic status is shown by itself. `keep` leaves the existing MOTD alone and removes linux-cli-setup login MOTD hooks. `combine` shows the existing MOTD first, then the linux-cli-setup dynamic status block. If no MOTD option is provided in an interactive run and no saved MOTD mode exists, the installer asks which mode to use.
+`replace` is the general noninteractive default and hides existing MOTD entries so the linux-cli-setup dynamic status is shown by itself. `keep` leaves the existing MOTD alone and removes linux-cli-setup login MOTD hooks. `combine` shows the existing MOTD first, then the linux-cli-setup dynamic status block. `fastfetch` uses replace behavior for competing MOTDs and shows only `fastfetch --config neofetch.jsonc` from a marked block at the bottom of the target user's Fish configuration.
 
-To switch an installed system to replace mode later, run `sudo motdreplace`. The command backs up a regular `/etc/motd`, disables competing executable update-motd snippets with restoration records, installs the linux-cli-setup login hook, and saves `motd_mode=replace` for future updates. Keep mode retains the inactive linux-cli-setup MOTD assets so this command remains available without needing another download.
+Fastfetch mode is offered or accepted only when the command is already installed or its package is available from the detected package manager. Selecting it makes Fastfetch a required package and verifies the command before changing MOTD configuration. Garuda Linux defaults to Fastfetch mode when no explicit or saved mode exists; other systems default to replace. An explicit install choice overrides the distro default.
 
-For replace and combine modes, the installed MOTD command uses UniFetch with OS-matched ASCII art when `unifetch` is installed. Both views group system, resource, network, and service details with separators. They show OS and kernel, uptime, load, available temperature, process and logged-in-user counts, memory usage with percentage, swap usage, mounted local and NFS storage except `/snap` mounts, local IP, configured DNS servers, internet/public-IP status, cached package-update status, UFW and SSH status, and whether a reboot may be required. Network and storage probes have short timeouts so an unavailable service or stale mount does not hold up login. Arch/Garuda installs try `unifetch` as an optional core package through pacman or yay/AUR. Debian/Ubuntu installs do not add a third-party UniFetch repository; they use UniFetch only when the command already exists.
+The selected mode is stored in `/var/lib/linux-cli-setup/install.env` and reused by later updates. Use `sudo ./update.sh --motd keep|replace|combine|fastfetch` to explicitly change and save it. Switching away from Fastfetch mode removes only the marked managed block and preserves unrelated Fish configuration. If an equivalent unmarked Fastfetch command already exists, it is treated as user configuration and is not duplicated or removed.
 
-On systems with `/etc/update-motd.d`, the installer uses `99-linux-cli-setup` so combined MOTD output appears after existing distro entries. On systems without `/etc/update-motd.d`, replace and combine modes use a Fish login hook under `/etc/fish/conf.d/`. `LINUX_CLI_MOTD_MODE=keep|replace|combine` is also supported.
+To switch an installed system from keep or combine mode to replace mode later, run `sudo motdreplace`. When Fastfetch mode is active, use `sudo ./update.sh --motd replace` instead so the managed Fish block is removed safely.
+
+For replace and combine modes, the installed MOTD command uses UniFetch with OS-matched ASCII art when `unifetch` is installed. Both views group system, resource, network, and service details with separators. They show OS and kernel, uptime, load, available temperature, process and logged-in-user counts, memory usage with percentage, swap usage, mounted local and NFS storage except `/snap` mounts, local IP, configured DNS servers, internet/public-IP status, cached package-update status, UFW and SSH status, and whether a reboot may be required. Network and storage probes have short timeouts so an unavailable service or stale mount does not hold up login. Arch/Garuda installs may install `unifetch` as an optional core package through pacman or yay/AUR. Debian/Ubuntu installs do not add a third-party UniFetch repository; they use UniFetch only when the command already exists.
+
+On systems with `/etc/update-motd.d`, the installer uses `99-linux-cli-setup` so combined MOTD output appears after existing distro entries. On systems without `/etc/update-motd.d`, replace and combine modes use a Fish login hook under `/etc/fish/conf.d/`. `LINUX_CLI_MOTD_MODE=keep|replace|combine|fastfetch` is also supported.
 
 ## Notes
 

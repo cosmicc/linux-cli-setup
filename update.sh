@@ -19,7 +19,7 @@ Options:
   --all-profiles          Update every supported group.
   --skip-performance      Skip the default performance tuning section.
   --skip-hardening        Skip the default hardening section.
-  --motd MODE             MOTD behavior: keep, replace, or combine.
+  --motd MODE             MOTD behavior: keep, replace, combine, or fastfetch.
   --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.
@@ -29,6 +29,9 @@ Options:
 If no group option is provided, update.sh updates the previously installed
 profiles. Existing configuration files are preserved and missing configuration
 files are installed.
+
+Garuda Linux defaults to fastfetch mode when no explicit or saved mode exists.
+An explicit --motd selection changes the mode saved for later updates.
 USAGE
 }
 

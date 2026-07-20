@@ -24,7 +24,7 @@ Options:
   --all-profiles          Install every supported group.
   --skip-performance      Skip the default performance tuning section.
   --skip-hardening        Skip the default hardening section.
-  --motd MODE             MOTD behavior: keep, replace, or combine.
+  --motd MODE             MOTD behavior: keep, replace, combine, or fastfetch.
   --list-profiles         Show available groups.
   --debug                 Show captured installer output and debug details.
   --no-color              Disable colored console output.
@@ -33,12 +33,15 @@ Options:
 
 Environment:
   TARGET_USER=username                 Use when running directly as root.
-  LINUX_CLI_MOTD_MODE=MODE             MOTD behavior: keep, replace, or combine.
+  LINUX_CLI_MOTD_MODE=MODE             MOTD behavior: keep, replace, combine, or fastfetch.
   LINUX_CLI_DOCKER_APT_SOURCE=distro   Use distro Docker packages instead of Docker's official apt repo.
   LINUX_CLI_ENABLE_CARGO_FALLBACKS=0   Skip cargo source-build fallbacks for comfort tools.
 
 If no group option is provided, only core is installed. If linux-cli-setup is
 already installed, exit and run update.sh instead.
+
+Garuda Linux defaults to fastfetch mode when no explicit or saved mode exists.
+Fastfetch mode is available only when its command is installed or packaged.
 HELP
 }
 
@@ -186,6 +189,7 @@ main() {
     update_package_database_and_system
     ensure_yay_on_arch
     sync_selected_profiles
+    ensure_fastfetch_motd_command
     install_jetbrains_nerd_font_from_package_or_release
     enable_openssh_service
     configure_hardening_section
@@ -198,6 +202,7 @@ main() {
     install_auto_update_service
     configure_git_defaults
     configure_fish_files
+    sync_fastfetch_fish_motd_block
     configure_ssh_client_defaults
     if [[ "$INSTALL_MODE" == "update" ]]; then
         update_fisher_plugins

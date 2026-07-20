@@ -367,7 +367,7 @@ suppress_static_motd() {
     local tmp_file
     local backup
 
-    [[ "${MOTD_MODE:-replace}" == "replace" ]] || return 0
+    [[ "${MOTD_MODE:-replace}" == "replace" || "${MOTD_MODE:-replace}" == "fastfetch" ]] || return 0
     [[ -e "$motd_path" ]] || return 0
 
     if [[ -L "$motd_path" ]]; then
@@ -406,7 +406,56 @@ remove_linux_cli_motd_hooks() {
     remove_file_if_managed_or_backup /etc/fish/conf.d/linux-cli-motd.fish "$FISH_TEMPLATE_DIR/conf.d/linux-cli-motd.fish"
 }
 
+retire_fastfetch_motd_path() {
+    local installed_path="$1"
+    local backup_label="$2"
+    local backup_path
+
+    [[ -e "$installed_path" || -L "$installed_path" ]] || return 0
+
+    run_step "Creating directory" "$CONFIG_DIR" install -m 0700 -d "$CONFIG_DIR"
+    backup_path="$CONFIG_DIR/fastfetch-disabled-${backup_label}-${TIMESTAMP}.bak"
+    run_step "Disabling linux-cli-setup MOTD path" "$installed_path" mv -- "$installed_path" "$backup_path"
+    record_rollback_cmd "mv -f $(shell_quote "$backup_path") $(shell_quote "$installed_path")"
+}
+
+install_fastfetch_motd() {
+    local motd_file
+    local state_dir="/etc/update-motd.d/.linux-cli-setup-disabled"
+    local state_file=""
+
+    log "Using Fastfetch MOTD mode from the target user's managed Fish configuration block."
+
+    # Fixed project-owned hook paths must not remain active because Fastfetch
+    # mode replaces linux-cli-motd and UniFetch login output.
+    retire_fastfetch_motd_path "$MOTD_UPDATE_SNIPPET" update-motd
+    retire_fastfetch_motd_path "$LEGACY_MOTD_UPDATE_SNIPPET" legacy-update-motd
+    retire_fastfetch_motd_path /etc/fish/conf.d/linux-cli-motd.fish fish-hook
+    retire_fastfetch_motd_path /usr/local/bin/linux-cli-motd command
+    retire_fastfetch_motd_path "$UNIFETCH_MOTD_CONFIG" unifetch-config
+
+    if [[ -d /etc/update-motd.d ]]; then
+        run_step "Creating directory" "$state_dir" mkdir -p "$state_dir"
+        state_file="$state_dir/disabled-${TIMESTAMP}.txt"
+        while IFS= read -r -d '' motd_file; do
+            run_step "Disabling MOTD snippet" "$motd_file" chmod a-x "$motd_file"
+            record_rollback_cmd "chmod a+x $(shell_quote "$motd_file")"
+            printf '%s\n' "$motd_file" >> "$state_file"
+        done < <(find /etc/update-motd.d -maxdepth 1 -type f -perm /111 -print0)
+        if [[ ! -s "$state_file" ]]; then
+            rm -f -- "$state_file"
+        fi
+    fi
+
+    suppress_static_motd
+}
+
 install_motd() {
+    if [[ "${MOTD_MODE:-replace}" == "fastfetch" ]]; then
+        install_fastfetch_motd
+        return
+    fi
+
     case "${MOTD_MODE:-replace}" in
         keep)
             log "Keeping existing MOTD and removing linux-cli-setup login MOTD hooks."
@@ -426,7 +475,7 @@ install_motd() {
             log "Replacing existing MOTD entries with linux-cli-setup dynamic status."
             ;;
         *)
-            die "Unknown MOTD mode '${MOTD_MODE:-}'. Use keep, replace, or combine."
+            die "Unknown MOTD mode '${MOTD_MODE:-}'. Use keep, replace, combine, or fastfetch."
             ;;
     esac
 

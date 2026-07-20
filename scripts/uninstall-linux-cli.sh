@@ -147,12 +147,21 @@ remove_auto_update_config() {
 
 remove_managed_files() {
     local fish_config_dir="$TARGET_HOME/.config/fish"
+    local fastfetch_motd_block_removed=0
     local function_template
     local ssh_dir="$TARGET_HOME/.ssh"
     local ssh_config="$ssh_dir/config"
     local include_line='Include ~/.ssh/conf.d/*.conf'
 
-    remove_file_if_managed_or_backup "$fish_config_dir/config.fish" "$FISH_TEMPLATE_DIR/config.fish"
+    if remove_fastfetch_fish_motd_block "$fish_config_dir/config.fish"; then
+        fastfetch_motd_block_removed=1
+    fi
+    if [[ "$fastfetch_motd_block_removed" -eq 1 ]] && \
+        ! cmp -s "$fish_config_dir/config.fish" "$FISH_TEMPLATE_DIR/config.fish"; then
+        log "Preserving user Fish configuration after removing the managed Fastfetch MOTD block."
+    else
+        remove_file_if_managed_or_backup "$fish_config_dir/config.fish" "$FISH_TEMPLATE_DIR/config.fish"
+    fi
     remove_file_if_managed_or_backup "$fish_config_dir/fish_plugins" "$FISH_TEMPLATE_DIR/fish_plugins"
     while IFS= read -r -d '' function_template; do
         remove_file_if_managed_or_backup "$fish_config_dir/functions/$(basename "$function_template")" "$function_template"

@@ -9,6 +9,9 @@ PROJECT_ROOT="$(cd -- "$COMMON_SCRIPT_DIR/../.." && pwd)"
 VERSION_FILE="$PROJECT_ROOT/VERSION"
 INSTALLED_VERSION_FILE="/usr/local/share/linux-cli-setup/VERSION"
 FISH_TEMPLATE_DIR="$PROJECT_ROOT/templates/fish"
+FASTFETCH_FISH_MOTD_TEMPLATE="$FISH_TEMPLATE_DIR/fastfetch-motd.fish"
+FASTFETCH_FISH_MOTD_BEGIN="# >>> linux-cli-setup managed Fastfetch MOTD >>>"
+FASTFETCH_FISH_MOTD_END="# <<< linux-cli-setup managed Fastfetch MOTD <<<"
 SSH_TEMPLATE_DIR="$PROJECT_ROOT/templates/ssh"
 SYSCTL_TEMPLATE_DIR="$PROJECT_ROOT/templates/sysctl"
 APT_TEMPLATE_DIR="$PROJECT_ROOT/templates/apt"
@@ -731,7 +734,7 @@ read_state_value() {
 
 validate_motd_mode() {
     case "$1" in
-        keep|replace|combine)
+        keep|replace|combine|fastfetch)
             return 0
             ;;
         *)
@@ -743,7 +746,7 @@ validate_motd_mode() {
 set_motd_mode() {
     local mode="$1"
 
-    validate_motd_mode "$mode" || die "Unknown MOTD mode '$mode'. Use keep, replace, or combine."
+    validate_motd_mode "$mode" || die "Unknown MOTD mode '$mode'. Use keep, replace, combine, or fastfetch."
     MOTD_MODE="$mode"
     MOTD_MODE_EXPLICIT=1
     export MOTD_MODE
@@ -751,16 +754,31 @@ set_motd_mode() {
 
 prompt_for_motd_mode() {
     local answer
+    local default_mode="replace"
+    local fastfetch_available=0
+
+    if fastfetch_motd_available; then
+        fastfetch_available=1
+        if is_garuda_linux; then
+            default_mode="fastfetch"
+        fi
+    fi
 
     console_line cyan "[linux-cli-setup] Choose MOTD behavior:"
     console_line cyan "  1) replace  Hide existing MOTD entries and show linux-cli-setup only."
     console_line cyan "  2) keep     Leave the existing MOTD alone and do not show linux-cli-setup."
     console_line cyan "  3) combine  Show the existing MOTD first, then linux-cli-setup."
-    printf '[linux-cli-setup] MOTD mode [replace]: '
+    if [[ "$fastfetch_available" -eq 1 ]]; then
+        console_line cyan "  4) fastfetch  Hide existing MOTD entries and show Fastfetch only."
+    fi
+    printf '[linux-cli-setup] MOTD mode [%s]: ' "$default_mode"
     read -r answer
 
     case "${answer,,}" in
-        ""|1|r|replace)
+        "")
+            MOTD_MODE="$default_mode"
+            ;;
+        1|r|replace)
             MOTD_MODE=replace
             ;;
         2|k|keep)
@@ -769,22 +787,35 @@ prompt_for_motd_mode() {
         3|c|combine)
             MOTD_MODE=combine
             ;;
+        4|f|fastfetch)
+            [[ "$fastfetch_available" -eq 1 ]] ||
+                die "Fastfetch MOTD mode is unavailable because fastfetch is not installed or available from this system's package manager."
+            MOTD_MODE=fastfetch
+            ;;
         *)
-            die "Unknown MOTD selection '$answer'. Use 1, 2, 3, keep, replace, or combine."
+            die "Unknown MOTD selection '$answer'. Use keep, replace, combine, or fastfetch when available."
             ;;
     esac
+}
+
+validate_fastfetch_motd_selection() {
+    [[ "${MOTD_MODE:-}" == "fastfetch" ]] || return 0
+    fastfetch_motd_available ||
+        die "Fastfetch MOTD mode is unavailable because fastfetch is not installed or available from this system's package manager. Choose keep, replace, or combine instead."
 }
 
 resolve_motd_mode() {
     local saved_motd_mode
 
     if [[ "$MOTD_MODE_EXPLICIT" -eq 1 ]]; then
+        validate_fastfetch_motd_selection
         export MOTD_MODE
         return
     fi
 
     if [[ -n "${LINUX_CLI_MOTD_MODE:-}" ]]; then
         set_motd_mode "$LINUX_CLI_MOTD_MODE"
+        validate_fastfetch_motd_selection
         return
     fi
 
@@ -796,15 +827,23 @@ resolve_motd_mode() {
             warn "Ignoring invalid saved MOTD mode '$saved_motd_mode'; using replace."
             MOTD_MODE=replace
         fi
+        validate_fastfetch_motd_selection
         export MOTD_MODE
         return
     fi
 
     if [[ -t 0 ]]; then
         prompt_for_motd_mode
+    elif is_garuda_linux && fastfetch_motd_available; then
+        MOTD_MODE=fastfetch
+        log "Garuda Linux detected; defaulting to Fastfetch MOTD mode."
     else
+        if is_garuda_linux; then
+            warn "Garuda Linux was detected, but Fastfetch is unavailable; using replace MOTD mode."
+        fi
         MOTD_MODE=replace
     fi
+    validate_fastfetch_motd_selection
     export MOTD_MODE
 }
 
@@ -862,6 +901,61 @@ detect_package_family() {
     fi
 
     return 1
+}
+
+is_garuda_linux() {
+    local distribution_id=""
+
+    [[ -r /etc/os-release ]] || return 1
+    distribution_id="$({
+        # /etc/os-release is a root-managed operating-system contract.
+        # Source it in a subshell so its variables cannot alter installer state.
+        unset ID
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        printf '%s' "${ID:-}"
+    })"
+
+    [[ "${distribution_id,,}" == "garuda" ]]
+}
+
+fastfetch_motd_available() {
+    target_command_exists fastfetch || package_is_available fastfetch
+}
+
+ensure_fastfetch_motd_command() {
+    local PACKAGE_INSTALL_PROFILE="core"
+
+    [[ "${MOTD_MODE:-}" == "fastfetch" ]] || return 0
+    if target_command_exists fastfetch; then
+        return 0
+    fi
+    package_is_available fastfetch ||
+        die "Fastfetch MOTD mode cannot be applied because the fastfetch package is unavailable."
+
+    log "Fastfetch MOTD mode requires the fastfetch command; ensuring its package is installed."
+    case "$PACKAGE_FAMILY" in
+        arch)
+            if pacman -Si fastfetch >/dev/null 2>&1; then
+                install_arch_required_packages fastfetch
+            elif command -v yay >/dev/null 2>&1 && run_as_target yay -Si fastfetch >/dev/null 2>&1; then
+                run_step "${PACKAGE_STEP_VERB:-Installing}" "AUR package core/fastfetch" \
+                    run_as_target yay -S --needed --noconfirm fastfetch
+                record_package_install_rollback fastfetch
+            else
+                die "Fastfetch MOTD mode cannot be applied because no usable Arch package source provides fastfetch."
+            fi
+            ;;
+        debian)
+            install_debian_required_packages fastfetch
+            ;;
+        *)
+            die "Fastfetch MOTD mode is unsupported for package family '$PACKAGE_FAMILY'."
+            ;;
+    esac
+
+    target_command_exists fastfetch ||
+        die "Fastfetch MOTD mode cannot be applied because the fastfetch command is unavailable after package installation."
 }
 
 unsupported_distribution_message() {
@@ -1057,7 +1151,7 @@ parse_profile_selection() {
                 if [[ "$ENABLE_MOTD_OPTION" -eq 1 ]]; then
                     local option="$1"
                     shift
-                    [[ $# -gt 0 ]] || die "$option requires keep, replace, or combine."
+                    [[ $# -gt 0 ]] || die "$option requires keep, replace, combine, or fastfetch."
                     set_motd_mode "$1"
                 else
                     PROFILE_POSITIONAL_ARGS+=("$1")
@@ -1205,6 +1299,114 @@ install_config_file_optional() {
     fi
 
     install_owned_file_optional "$source" "$destination" "$mode" "$owner" "$group"
+}
+
+install_fastfetch_fish_motd_block() {
+    local backup
+    local begin_count
+    local begin_line
+    local end_count
+    local end_line
+    local fish_config="$TARGET_HOME/.config/fish/config.fish"
+    local merged
+
+    [[ "${MOTD_MODE:-}" == "fastfetch" ]] || return 0
+    [[ -f "$FASTFETCH_FISH_MOTD_TEMPLATE" ]] || die "Missing Fastfetch Fish MOTD template: $FASTFETCH_FISH_MOTD_TEMPLATE"
+    [[ -f "$fish_config" && ! -L "$fish_config" ]] ||
+        die "Refusing to update non-regular Fish configuration: $fish_config"
+
+    begin_count="$(grep -Fxc "$FASTFETCH_FISH_MOTD_BEGIN" "$fish_config" || true)"
+    end_count="$(grep -Fxc "$FASTFETCH_FISH_MOTD_END" "$fish_config" || true)"
+    if [[ "$begin_count" -eq 1 && "$end_count" -eq 1 ]]; then
+        begin_line="$(grep -Fn "$FASTFETCH_FISH_MOTD_BEGIN" "$fish_config" | cut -d: -f1)"
+        end_line="$(grep -Fn "$FASTFETCH_FISH_MOTD_END" "$fish_config" | cut -d: -f1)"
+        [[ "$begin_line" -lt "$end_line" ]] ||
+            die "Malformed managed Fastfetch MOTD marker order in $fish_config."
+        log "Preserving existing managed Fastfetch MOTD block in $fish_config"
+        return 0
+    fi
+    if [[ "$begin_count" -ne 0 || "$end_count" -ne 0 ]]; then
+        die "Malformed managed Fastfetch MOTD markers in $fish_config; restore the matching marker before updating."
+    fi
+    if grep -Eq '^[[:space:]]*fastfetch[[:space:]]+--config[[:space:]]+neofetch[.]jsonc[[:space:]]*$' "$fish_config"; then
+        log "Fastfetch startup information already exists in $fish_config; not adding a duplicate managed block."
+        return 0
+    fi
+
+    backup="${fish_config}.linux-cli-setup.${TIMESTAMP}.bak"
+    run_step "Backing up" "$fish_config" cp -p -- "$fish_config" "$backup"
+    record_rollback_cmd "cp -p $(shell_quote "$backup") $(shell_quote "$fish_config")"
+
+    merged="$(mktemp "$(dirname "$fish_config")/.config.fish.linux-cli-setup.XXXXXX")"
+    cp -- "$fish_config" "$merged"
+    if [[ -s "$merged" && "$(tail -c 1 "$merged" | od -An -t x1 | tr -d '[:space:]')" != "0a" ]]; then
+        printf '\n' >> "$merged"
+    fi
+    cat "$FASTFETCH_FISH_MOTD_TEMPLATE" >> "$merged"
+    chown "$TARGET_USER:$TARGET_GROUP" "$merged"
+    chmod 0644 "$merged"
+    run_step "Adding managed Fastfetch MOTD block" "$fish_config" mv -f -- "$merged" "$fish_config"
+}
+
+remove_fastfetch_fish_motd_block() {
+    local backup
+    local begin_count
+    local end_count
+    local fish_config="$1"
+    local cleaned
+
+    [[ -f "$fish_config" && ! -L "$fish_config" ]] || return 1
+    begin_count="$(grep -Fxc "$FASTFETCH_FISH_MOTD_BEGIN" "$fish_config" || true)"
+    end_count="$(grep -Fxc "$FASTFETCH_FISH_MOTD_END" "$fish_config" || true)"
+    if [[ "$begin_count" -eq 0 && "$end_count" -eq 0 ]]; then
+        return 1
+    fi
+    if [[ "$begin_count" -ne 1 || "$end_count" -ne 1 ]]; then
+        warn "Malformed managed Fastfetch MOTD markers in $fish_config; preserving the file unchanged."
+        return 1
+    fi
+
+    cleaned="$(mktemp "$(dirname "$fish_config")/.config.fish.linux-cli-setup.XXXXXX")"
+    if ! awk -v begin="$FASTFETCH_FISH_MOTD_BEGIN" -v end="$FASTFETCH_FISH_MOTD_END" '
+        $0 == begin { in_managed_block = 1; next }
+        $0 == end { in_managed_block = 0; next }
+        !in_managed_block { print }
+        END { if (in_managed_block) exit 1 }
+    ' "$fish_config" > "$cleaned"; then
+        rm -f -- "$cleaned"
+        warn "Could not safely remove the managed Fastfetch MOTD block from $fish_config."
+        return 1
+    fi
+
+    backup="${fish_config}.linux-cli-setup.uninstall.${TIMESTAMP}.bak"
+    run_step_optional "Backing up" "$fish_config" cp -p -- "$fish_config" "$backup" || {
+        rm -f -- "$cleaned"
+        return 1
+    }
+    record_rollback_cmd "cp -p $(shell_quote "$backup") $(shell_quote "$fish_config")"
+    chown "$TARGET_USER:$TARGET_GROUP" "$cleaned"
+    chmod 0644 "$cleaned"
+    run_step_optional "Removing managed Fastfetch MOTD block" "$fish_config" mv -f -- "$cleaned" "$fish_config" || {
+        rm -f -- "$cleaned"
+        return 1
+    }
+    return 0
+}
+
+sync_fastfetch_fish_motd_block() {
+    local fish_config="$TARGET_HOME/.config/fish/config.fish"
+
+    if [[ "${MOTD_MODE:-}" == "fastfetch" ]]; then
+        install_fastfetch_fish_motd_block
+        return
+    fi
+
+    if remove_fastfetch_fish_motd_block "$fish_config"; then
+        log "Removed the managed Fastfetch MOTD block after changing MOTD mode to $MOTD_MODE."
+    elif [[ -f "$fish_config" ]] && \
+        grep -Eq '^[[:space:]]*fastfetch[[:space:]]+--config[[:space:]]+neofetch[.]jsonc[[:space:]]*$' "$fish_config"; then
+        warn "An unmarked Fastfetch startup command remains in $fish_config and was preserved as user configuration."
+    fi
 }
 
 merge_missing_shell_settings() {

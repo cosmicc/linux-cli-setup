@@ -6,11 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Added `fastfetch` as a fourth persisted MOTD mode alongside keep, replace, and combine, with package availability enforcement and required command verification.
+- Added non-mutating regression coverage for Fastfetch selection, Garuda defaults, required package installation, and managed Fish block lifecycle behavior.
 - Added process count, logged-in-user count, swap usage, memory-used percentage, available system temperature, and configured DNS servers to both MOTD display paths.
 - Added the root-only `motdreplace` command for replacing competing login MOTD entries and atomically saving replace mode for future updates.
 
 ### Changed
 
+- Changed Garuda Linux to default to Fastfetch mode only when no explicit or saved MOTD mode exists; explicit install choices and saved update choices are honored.
+- Changed Fastfetch mode on supported systems to append an identifiable managed Fish block only when missing, preserve all other `config.fish` content, and use replace semantics for competing MOTDs.
+- Changed updates to reuse the saved MOTD mode unless `update.sh --motd MODE` explicitly changes it.
 - Grouped MOTD details into separated system, resource, network, and service sections.
 - Changed keep mode to retain refreshed inactive MOTD assets so `motdreplace` can enable the managed MOTD without downloading files again.
 - Changed updates to reapply the saved MOTD mode so replace mode continues hiding newly added competing MOTD entries.
@@ -18,6 +23,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Fixed Garuda Linux login sessions showing no MOTD after linux-cli-setup replaced the distribution's original Fish configuration by restoring the native Fastfetch startup behavior as the distro default.
 - Fixed `/snap` mountpoints appearing as disks in the MOTD.
 
 ## 0.5b - 07.17.2026

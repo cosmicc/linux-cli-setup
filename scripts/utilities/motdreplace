@@ -40,7 +40,14 @@ motd_mode=replace in the managed install state for future updates.
 Existing executable update-motd snippets are disabled and recorded so
 linux-cli-setup uninstall or another MOTD mode can restore them. A regular
 /etc/motd file is backed up before it is hidden.
+
+When Fastfetch mode is active, use update.sh --motd replace so the managed Fish
+block is removed as part of the mode change.
 HELP
+}
+
+saved_motd_mode() {
+    awk -F= '$1 == "motd_mode" { value = substr($0, index($0, "=") + 1) } END { print value }' "$STATE_FILE"
 }
 
 fail() {
@@ -267,6 +274,9 @@ main() {
 
     [[ "$EUID" -eq 0 ]] || fail "Root privileges are required. Run sudo motdreplace."
     require_secure_install_state
+    if [[ "$(saved_motd_mode)" == "fastfetch" ]]; then
+        fail "Fastfetch mode is active. Run update.sh --motd replace so its managed Fish block is removed safely."
+    fi
     require_secure_motd_command
     validate_static_motd_target
 
